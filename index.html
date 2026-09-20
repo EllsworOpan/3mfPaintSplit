@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#141a22" />
+    <meta
+      name="description"
+      content="View and cut painted 3MF models while preserving PrusaSlicer MMU and Bambu AMS material assignments. All processing stays in your browser."
+    />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>3MF Paint Split</title>
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="brand" href="./" aria-label="3MF Paint Split home"
+        ><span class="brand-icon">◩</span><span>3MF <strong>Paint Split</strong></span
+        ><span class="version">1.0</span></a
+      >
+      <div class="header-right">
+        <span class="local-label">Files stay on your device</span
+        ><button id="help-button" class="quiet">How it works</button
+        ><button id="open-button" class="secondary">Open 3MF <span>↗</span></button>
+      </div>
+      <input id="file-input" type="file" accept=".3mf" hidden />
+    </header>
+    <main class="workspace">
+      <section class="viewport" aria-label="3D model workspace">
+        <div id="canvas-host"></div>
+        <div class="viewport-top">
+          <div>
+            <span class="eyebrow">MODEL WORKSPACE</span>
+            <h1 id="model-title">Your next clean cut.</h1>
+            <span id="model-detail">Painted surfaces. Separate pieces.</span>
+          </div>
+          <span id="demo-tag" class="tag" hidden>DEMO MODEL</span>
+        </div>
+        <div id="empty-state" class="empty-state">
+          <div class="drop-icon">↥</div>
+          <h2>Split the model.<br />Keep the paint.</h2>
+          <p>
+            Open a painted 3MF, position your cut,<br />and take the pieces back to your slicer.
+          </p>
+          <button id="empty-open" class="primary">Open painted 3MF</button
+          ><button id="demo-button" class="text-button">Try a painted demo <span>→</span></button
+          ><small>PrusaSlicer · Bambu Studio · OrcaSlicer</small>
+        </div>
+        <div id="view-toolbar" class="view-toolbar" hidden>
+          <button id="fit" title="Fit model (F)">Fit</button><span class="divider"></span
+          ><button data-view="iso" class="active">3D</button><button data-view="top">Top</button
+          ><button data-view="front">Front</button><button data-view="right">Right</button
+          ><span class="divider"></span><button id="wireframe" aria-pressed="false">Edges</button>
+        </div>
+        <div class="viewport-bottom">
+          <span id="view-hint">Drop a .3mf anywhere to begin</span
+          ><span class="axis-key"><b>X</b><b>Y</b><b>Z</b><span>mm</span></span>
+        </div>
+        <div id="busy-overlay" class="busy-overlay" hidden>
+          <span class="spinner"></span>
+          <p id="busy-message">Reading model…</p>
+          <button id="cancel" class="secondary">Cancel</button>
+        </div>
+        <div id="drop-overlay" class="drop-overlay" hidden>Drop your painted 3MF</div>
+      </section>
+      <aside class="inspector">
+        <section class="panel cut-panel">
+          <div class="section-title">
+            <h2><span class="step">01</span> Cut plane</h2>
+            <label class="switch-label"
+              ><input id="show-plane" type="checkbox" checked disabled /> Show</label
+            >
+          </div>
+          <div class="field">
+            <label for="piece-select">Piece to cut</label
+            ><select id="piece-select" disabled>
+              <option>Open a model first</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Plane direction</label>
+            <div class="segmented axis-buttons">
+              <button data-axis="X" disabled><span class="x-dot"></span>X</button
+              ><button data-axis="Y" disabled><span class="y-dot"></span>Y</button
+              ><button data-axis="Z" class="active" disabled><span class="z-dot"></span>Z</button>
+            </div>
+          </div>
+          <div class="field position-field">
+            <div class="label-row">
+              <label for="offset">Position from center</label
+              ><button id="center" class="text-button" disabled>Center</button>
+            </div>
+            <div class="number-unit">
+              <input id="offset" type="number" value="0" step="0.1" disabled /><span>mm</span>
+            </div>
+            <input
+              id="offset-slider"
+              aria-label="Cut position"
+              type="range"
+              min="-25"
+              max="25"
+              value="0"
+              step="0.1"
+              disabled
+            />
+          </div>
+          <div class="two-fields">
+            <div class="field">
+              <label for="tilt">Tilt</label>
+              <div class="number-unit">
+                <input id="tilt" type="number" min="0" max="180" step="1" value="0" disabled /><span
+                  >°</span
+                >
+              </div>
+            </div>
+            <div class="field">
+              <label for="azimuth">Azimuth</label>
+              <div class="number-unit">
+                <input
+                  id="azimuth"
+                  type="number"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  value="0"
+                  disabled
+                /><span>°</span>
+              </div>
+            </div>
+          </div>
+          <div class="gizmo-row">
+            <span>Drag plane to</span>
+            <div class="segmented compact">
+              <button id="move-mode" class="active" disabled>Move</button
+              ><button id="rotate-mode" disabled>Rotate</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="cap-material">New cut face material</label
+            ><select id="cap-material" disabled>
+              <option>Material 1</option>
+            </select>
+          </div>
+          <button id="cut-button" class="primary full" disabled>
+            <span>⌁</span> Apply cut <span class="keycap">C</span>
+          </button>
+          <p class="panel-note">Both halves are kept. Surface paint stays assigned.</p>
+        </section>
+        <section class="panel pieces-panel">
+          <div class="section-title">
+            <h2>
+              <span class="step">02</span> Pieces <span id="piece-count" class="count">0</span>
+            </h2>
+            <button id="undo" class="quiet" disabled title="Undo cut (Ctrl+Z)">↶ Undo</button>
+          </div>
+          <div id="piece-list" class="piece-list">
+            <p class="muted placeholder">Your model’s pieces will appear here.</p>
+          </div>
+          <div class="label-row">
+            <label for="explode">Separate in preview</label><output id="explode-value">0 mm</output>
+          </div>
+          <input id="explode" type="range" min="0" max="40" value="0" step="1" disabled />
+          <p class="panel-note">Preview spacing does not change the export.</p>
+        </section>
+        <section class="panel materials-panel">
+          <div class="section-title">
+            <h2>Materials</h2>
+            <span id="material-count" class="muted">—</span>
+          </div>
+          <div id="palette" class="palette"><span class="muted">Colors from your 3MF</span></div>
+        </section>
+        <section class="export-panel">
+          <div class="label-row">
+            <label for="export-scope">Export</label
+            ><select id="export-scope" disabled>
+              <option value="all">All pieces</option>
+              <option value="selected">Selected piece</option>
+            </select>
+          </div>
+          <button id="export-button" class="export-button" disabled>
+            ↓ <span>Save painted 3MF</span><span id="export-count">0</span>
+          </button>
+          <p>Separate objects, ready to orient in PrusaSlicer.</p>
+        </section>
+      </aside>
+    </main>
+    <div id="toast" class="toast" role="status" hidden>
+      <span id="toast-message"></span
+      ><button id="dismiss-toast" aria-label="Dismiss message">×</button>
+    </div>
+    <dialog id="help-dialog">
+      <button id="close-help" class="close-dialog" aria-label="Close help">×</button
+      ><span class="eyebrow">FROM MODEL TO PRINT</span>
+      <h2>A clean cut, with the color intact.</h2>
+      <ol>
+        <li>
+          <strong>Open a painted 3MF.</strong> Native PrusaSlicer MMU and Bambu / Orca AMS paint are
+          read, including paint inside individual triangles.
+        </li>
+        <li>
+          <strong>Position the plane.</strong> Choose X, Y, or Z, change the offset, or tilt and
+          rotate the plane. Drag the arrow to move it; switch to Rotate for angle handles.
+        </li>
+        <li>
+          <strong>Apply your cut.</strong> Both pieces remain. Select any piece and cut it again.
+          Undo keeps the last 12 cuts.
+        </li>
+        <li>
+          <strong>Save the painted 3MF.</strong> Import it into PrusaSlicer as separate objects,
+          keep the same material slot order, choose your printer and filaments, then orient each
+          piece for printing.
+        </li>
+      </ol>
+      <p>
+        New interior faces use the material you choose. Existing paint is resolved into colored mesh
+        triangles, so exports can be larger than the original.
+      </p>
+      <p>
+        Printer profiles, supports, seams, modifiers, connectors, and variable layer settings are
+        not carried over. Cuts require closed, consistently oriented meshes. This is a straight
+        plane cutter; it does not add pins or joints.
+      </p>
+      <p class="muted">
+        All processing happens on your device. Use F to fit, C to cut, and Ctrl / ⌘ Z to undo.
+      </p>
+    </dialog>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
