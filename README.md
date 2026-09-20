@@ -66,13 +66,17 @@ Vite uses relative asset URLs, so the app and worker work under a repository sub
 
 ```powershell
 npm test
+npm run test:coverage
+npm run test:model
 npm run build
 npm run format
 ```
 
-The tests cover both paint dialects, extended material indices, recursive subdivisions, surface material area preservation, topology, volume conservation, oblique/repeated cuts, hollow caps, transforms, component references, malformed data, and 3MF round trips.
+The 81-test suite covers both paint dialects, every split-side arrangement, extended material indices, recursive subdivisions, exact spatial paint preservation, topology, volume conservation, oblique/repeated cuts, hollow caps, transforms, component references, malformed data, worker operations, undo, and 3MF round trips. Windows and Linux tests/builds run on pushes and pull requests.
 
-The optional PrusaSlicer integration test runs automatically when the installed CLI is found at the usual Windows path or `PRUSA_SLICER` is set to its executable. It imports the generated pieces with PrusaSlicer, verifies manifold status, re-exports them, and checks their paint again. It is skipped on hosts without PrusaSlicer, including the GitHub Pages runner.
+The two optional PrusaSlicer integration tests run automatically when the installed CLI is found at the usual Windows path or `PRUSA_SLICER` is set to its executable. They import the generated pieces with PrusaSlicer, verify manifold status, re-export them, and check their paint again. They are skipped on hosts without PrusaSlicer, including the GitHub Pages runner.
+
+The included [complex painted square](public/examples/complex-painted-square.3mf) has only two original mesh triangles on its top face and a complex native paint pattern within them. The [cut example](public/examples/complex-painted-square-cut.3mf) demonstrates preservation after an angled cut. Both are also served under `/examples/` by Docker and GitHub Pages. See the [test report and illustrated comparison](docs/TESTING.md) for the independent checks and reproduction instructions.
 
 Tests use generated fixtures. Validate the first export of your own miniature in PrusaSlicer's painted view and sliced preview before printing.
 

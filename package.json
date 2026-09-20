@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 5174 --strictPort",
     "test": "node --test tests/*.test.js",
-    "format": "prettier --write src tests index.html vite.config.js README.md docs"
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/*.js --test-coverage-exclude=src/demo.js tests/*.test.js",
+    "test:model": "node scripts/generate-test-model.js",
+    "format": "prettier --write src tests scripts index.html vite.config.js README.md docs"
   },
   "dependencies": {
     "@xmldom/xmldom": "0.9.12",

@@ -273,8 +273,16 @@ function capMesh(mesh, n, offset, outward, material) {
 }
 
 export function splitMesh(mesh, normal, offset, capMaterial = 1) {
-  if (!normal.every(Number.isFinite) || !Number.isFinite(offset) || length(normal) < EPS)
+  if (
+    (!Array.isArray(normal) && !ArrayBuffer.isView(normal)) ||
+    normal.length !== 3 ||
+    !normal.every(Number.isFinite) ||
+    !Number.isFinite(offset) ||
+    length(normal) < EPS
+  )
     throw new Error('Enter a valid cut plane.');
+  if (!Number.isInteger(capMaterial) || capMaterial < 1 || capMaterial > 255)
+    throw new Error('Choose a valid cut face material (1–255).');
   const norm = length(normal),
     n = mul(normal, 1 / norm);
   offset /= norm;

@@ -72,8 +72,19 @@ function pathOf(path, base = '') {
   return result.join('/');
 }
 function positiveInt(value, fallback = 1) {
+  if (value == null || String(value).trim() === '') return fallback;
   const n = Number(value);
-  return Number.isInteger(n) && n > 0 ? n : fallback;
+  // Slicer metadata uses zero to mean "inherit the enclosing material".
+  if (n === 0) return fallback;
+  if (!Number.isInteger(n) || n < 1 || n > 255)
+    throw new Error('The model contains an invalid material index (expected 1–255).');
+  return n;
+}
+function requiredNumber(element, name) {
+  const value = element.getAttribute(name);
+  if (value == null || value.trim() === '' || !Number.isFinite(Number(value)))
+    throw new Error(`The mesh contains a missing or invalid ${name} attribute.`);
+  return Number(value);
 }
 
 export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
@@ -250,7 +261,7 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
       }
     if (!mesh) return;
     const verts = children(child(mesh, 'vertices'), 'vertex').map((v) => {
-      const p = ['x', 'y', 'z'].map((k) => Number(v.getAttribute(k)));
+      const p = ['x', 'y', 'z'].map((k) => requiredNumber(v, k));
       if (!p.every(Number.isFinite)) throw new Error('The mesh contains an invalid vertex.');
       return new Vector3(...p).applyMatrix4(transform).multiplyScalar(data.unit).toArray();
     });
@@ -272,7 +283,7 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
       for (let i = group.first; i <= group.last; i++) {
         const t = triangles[i];
         if (!t) throw new Error('Invalid volume triangle range in 3MF metadata.');
-        const indices = ['v1', 'v2', 'v3'].map((k) => Number(t.getAttribute(k)));
+        const indices = ['v1', 'v2', 'v3'].map((k) => requiredNumber(t, k));
         if (indices.some((i) => !Number.isInteger(i) || i < 0 || i >= verts.length))
           throw new Error('A triangle references a missing vertex.');
         const points = indices.map((i) => verts[i]);
