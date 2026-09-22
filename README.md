@@ -92,3 +92,7 @@ Tests use generated fixtures. Validate the first export of your own miniature in
 | `src/main.js`     | User interface and workflow                           |
 
 Three.js, fflate, earcut, and xmldom retain their respective upstream licenses. No Texture2Paint source files are included.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE). The third-party dependencies retain their own licenses.
