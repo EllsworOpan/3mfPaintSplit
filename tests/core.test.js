@@ -233,7 +233,7 @@ test('nested external Bambu components retain paint and transforms', () => {
     );
     files['3D/Objects/object_1.model'] = strToU8(source);
     files['3D/3dmodel.model'] = strToU8(
-      '<model unit="millimeter" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"><resources><object id="5" type="model"><components><component objectid="2" p:path="/3D/Objects/object_1.model" transform="1 0 0 0 1 0 0 0 1 50 0 0"/></components></object></resources><build><item objectid="5" transform="1 0 0 0 1 0 0 0 1 0 10 0"/></build></model>',
+      '<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" unit="millimeter" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"><resources><object id="5" type="model"><components><component objectid="2" p:path="/3D/Objects/object_1.model" transform="1 0 0 0 1 0 0 0 1 50 0 0"/></components></object></resources><build><item objectid="5" transform="1 0 0 0 1 0 0 0 1 0 10 0"/></build></model>',
     );
   });
   const result = import3mf(bytes);

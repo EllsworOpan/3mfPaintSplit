@@ -104,5 +104,5 @@ for (const dialect of ['prusa', 'bambu'])
       () => decodePaint([A, B, C], dialect === 'prusa' ? 'EC' : 'FC', 1, dialect),
       /Truncated/,
     );
-    assert.throws(() => decodePaint([A, B, C], '1'.repeat(42), 1, dialect), /deeply/);
+    assert.throws(() => decodePaint([A, B, C], '1'.repeat(42), 1, dialect), /maxPaintDepth/);
   });

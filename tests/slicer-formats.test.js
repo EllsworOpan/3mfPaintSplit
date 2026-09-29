@@ -221,7 +221,7 @@ test('Bambu/Orca parts are scoped to their parent even when external models reus
     f['3D/Objects/first.model'] = strToU8(mesh);
     f['3D/Objects/second.model'] = strToU8(mesh);
     f[modelPath] = strToU8(
-      '<model><resources><object id="10"><components><component objectid="2" path="Objects/first.model"/></components></object><object id="20"><components><component objectid="2" path="Objects/second.model" transform="1 0 0 0 1 0 0 0 1 50 0 0"/></components></object></resources><build><item objectid="10"/><item objectid="20"/></build></model>',
+      '<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="10"><components><component objectid="2" path="Objects/first.model"/></components></object><object id="20"><components><component objectid="2" path="Objects/second.model" transform="1 0 0 0 1 0 0 0 1 50 0 0"/></components></object></resources><build><item objectid="10"/><item objectid="20"/></build></model>',
     );
     f['Metadata/model_settings.config'] = strToU8(
       '<config><object id="10"><metadata key="extruder" value="2"/><part id="2" subtype="normal_part"><metadata key="name" value="First"/><metadata key="extruder" value="0"/></part></object><object id="20"><part id="2" subtype="normal_part"><metadata key="name" value="Second"/><metadata key="extruder" value="3"/></part></object></config>',
@@ -243,7 +243,7 @@ test('component units scale mesh coordinates without scaling the parent translat
   const bytes = rewrite(base(), (f) => {
     f['3D/inches.model'] = strToU8(text(f).replace('unit="millimeter"', 'unit="inch"'));
     f[modelPath] = strToU8(
-      '<model unit="millimeter"><resources><object id="10"><components><component objectid="2" path="inches.model" transform="1 0 0 0 1 0 0 0 1 50 0 0"/></components></object></resources><build><item objectid="10" transform="1 0 0 0 1 0 0 0 1 0 10 0"/></build></model>',
+      '<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" unit="millimeter"><resources><object id="10"><components><component objectid="2" path="inches.model" transform="1 0 0 0 1 0 0 0 1 50 0 0"/></components></object></resources><build><item objectid="10" transform="1 0 0 0 1 0 0 0 1 0 10 0"/></build></model>',
     );
   });
   const result = open(bytes);

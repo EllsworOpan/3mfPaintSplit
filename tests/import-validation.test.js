@@ -34,11 +34,11 @@ test('3MF importer rejects corrupt ZIPs and archives with no model', () => {
 });
 test('component cycles and missing external models are rejected', () => {
   const model = (path) =>
-    `<model><resources><object id="2" type="model"><components><component objectid="2" ${path}/></components></object></resources><build><item objectid="2"/></build></model>`;
+    `<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="2" type="model"><components><component objectid="2" ${path}/></components></object></resources><build><item objectid="2"/></build></model>`;
   assert.throws(() => import3mf(modify(() => model(''))), /Cyclic/);
   assert.throws(
     () => import3mf(modify(() => model('path="/3D/missing.model"'))),
-    /Missing 3MF component/,
+    /Missing model/,
   );
 });
 test('two transformed instances remain separate and keep the same paint', () => {

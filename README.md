@@ -52,7 +52,7 @@ See [format notes](docs/FORMAT.md) for details and upstream references.
 - Closed meshes with consistently oriented triangles are required for cutting. Repair open/non-manifold geometry in a mesh repair tool first. Ambiguous vertex-touching or intersecting contours may require moving the plane slightly.
 - Supports, seams, negative/modifier volumes, printer settings, custom G-code, textures, connectors, variable layers, and assembly metadata are not preserved. Non-printing objects are excluded with a visible warning. Negative volumes are excluded rather than subtracted from the positive mesh; reapply them in the slicer when needed. PrusaSlicer 3 blend/gradient assignments become ordinary flat region IDs, with a warning: mixing recipes and a gradient's changing colors are discarded. Projects with different bed palettes retain slot numbers and show the first palette with a warning.
 - Default assignments become explicit painted triangle assignments on export. Later changing an object's default extruder will therefore not recolor those faces automatically.
-- Limits: 200 MB compressed input, 400 MB of relevant expanded archive data, and 1.5 million resolved triangles. Complex files can need substantial RAM. Cancelling a worker operation preserves current pieces but clears undo history.
+- There is no compressed 3MF upload-size cap. The shared reader expands only needed entries, with default processing budgets of 1 GiB total and 512 MB per entry. The cutting/conforming algorithm retains its 1.5-million-resolved-triangle budget. Complex files can need substantial RAM. Cancelling a worker operation preserves current pieces but clears undo history.
 - Disconnected islands within one half stay grouped in that object. PrusaSlicer's Split to Objects can separate them afterward if desired.
 
 ## Publish on GitHub Pages
@@ -87,10 +87,9 @@ Tests use generated fixtures. Validate the first export of your own miniature in
 
 | File                 | Responsibility                                        |
 | -------------------- | ----------------------------------------------------- |
-| `src/paint.js`       | Native triangle paint decoding/encoding               |
+| `src/paint.js`       | Shared paint API compatibility export               |
 | `src/geometry.js`    | Conforming edges, plane clipping, caps and validation |
-| `src/three-mf.js`    | 3MF archive, XML, material and component handling     |
-| `src/prusa-paint.js` | PrusaSlicer 3 volume roles and JSON paint annotations |
+| `src/three-mf.js`    | App mesh adapter for ThreeMFKit     |
 | `src/worker.js`      | Processing, cut history and export off the UI thread  |
 | `src/viewer.js`      | Three.js viewer, orbit controls and plane gizmo       |
 | `src/main.js`        | User interface and workflow                           |
@@ -100,3 +99,9 @@ Three.js, fflate, earcut, and xmldom retain their respective upstream licenses. 
 ## License
 
 This project is licensed under the [MIT License](LICENSE). The third-party dependencies retain their own licenses.
+
+## Shared 3MF API
+
+3MF reading, writing, paint encoding, target capabilities and slicer setting mappings live in the sibling **ThreeMFKit** project. This app consumes its checked-in browser build under `src/vendor/three-mf`; publishing needs no sibling checkout, package server or extra network dependency. App geometry processing stays here. Make format fixes in ThreeMFKit, then run its `npm run build` and `npm run sync -- --verify` to copy and test the same build in all three apps. The script refuses manual vendor edits and defaults to copying only. Use `npm run sync -- --commit --dry-run` to preview an update without writing files or changing Git; `npm run sync -- --commit` copies, verifies all apps and commits only managed API files with a standardized message. It never pushes. For the initial migration, app integration changes outside the vendor folder must also be committed before release.
+
+The API retains source archives for same-format updates, cleanly replaces edited models, and supports cross-format conversion through clean export. Region numbers stay separate even when display colors match. See the library's README and format evidence for the document model and preservation rules.

@@ -1,8 +1,10 @@
 import './style.css';
 import { Viewer } from './viewer.js';
 import { bounds, dot } from './geometry.js';
+import { paintTargets } from './vendor/three-mf/index.js';
 
 const $ = (id) => document.getElementById(id);
+$('export-format').replaceChildren(...paintTargets().map((t) => new Option(t.name, t.id)));
 let project = null,
   selectedId = null,
   busy = false,
