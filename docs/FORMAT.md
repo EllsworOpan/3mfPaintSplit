@@ -29,6 +29,14 @@ Cuts do not introduce clearance, translate objects, generate joints, or reorient
 
 ## Export contract
 
-The output is a geometry-and-paint 3MF in the traditional Prusa-compatible schema, with one object per resulting piece, explicit native face paint, a standard material color group, and newly generated model configuration matching the new face indices. Minimal filament colors and placeholder nozzle/filament dimensions allow the palette to travel with the archive; users must apply their actual printer and filament profiles in PrusaSlicer.
+The default PrusaSlicer 2 / Bambu / Orca output contains exactly three ZIP entries: `[Content_Types].xml`, `_rels/.rels`, and `3D/3dmodel.model`. It has one object per resulting piece, explicit native face paint in both dialects, names, and a standard material color group. It contains no slicer configuration files. In particular, there is no `Slic3r_PE.config`, `project_settings.config`, printer definition, nozzle/filament dimensions, or print profile. Palette colors are standard model data; material slot order must match the user's current slicer setup.
+
+PrusaSlicer 3 output adds its native JSON sidecars: `PrusaSlicer3_project.json` supplies only object/volume identities with empty settings and `config_containers: []`; `Slic3r_facets_annotation.json` supplies only MMU paint. Meshes are wrapped in volume components so annotations refer to the correct ordered triangles. No hardware/material-slot descriptors, printer presets, or profile values are synthesized. This separate output is necessary because alpha12 drops paint from model-only legacy XML imports. It has been validated by saving the export in the alpha12 CLI and checking the paint spatially afterward.
 
 No old model configuration or print job is copied wholesale: doing so would leave volume ranges, triangle references, supports, and other geometry-dependent metadata stale after clipping.
+
+## Import and automatic recovery
+
+Only model resources and the recognized role/material/palette/paint sidecars are inflated. G-code, thumbnails, textures, unrelated configs and other annotations are ignored. Object and volume metadata is reduced to names, material defaults and roles; Bambu/Orca part settings stay scoped to their parent component rather than using a global part-ID lookup. PrusaSlicer 3 paint is carried from its volume wrapper down to the shared mesh and never attached globally to a mesh ID.
+
+Import automatically ignores an unreadable optional Bambu/Orca project palette and warns that display colors need checking. There is no import mode toggle or options argument: call `import3mf(bytes, name, progress)`. Geometry/paint validation always rejects missing or ambiguous role metadata, invalid ranges, unsupported paint versions, and corrupt paint. Recovery does not turn modifiers into solid model parts or silently discard painting. PrusaSlicer 3's blend/gradient recipes are rejected because physical face-material numbers alone cannot represent them. Different bed palettes retain numeric slots, with the first palette shown and a warning.

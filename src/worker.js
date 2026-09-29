@@ -47,7 +47,7 @@ onmessage = ({ data }) => {
       result = snapshot();
     } else if (action === 'export') {
       const selected = pieces.filter((p) => data.ids.includes(p.id));
-      const bytes = export3mf(selected, data.palette);
+      const bytes = export3mf(selected, data.palette, data.options);
       postMessage({ id, result: bytes }, [bytes.buffer]);
       return;
     } else throw new Error('Unknown operation.');

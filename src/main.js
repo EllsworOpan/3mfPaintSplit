@@ -175,6 +175,7 @@ function renderPieces() {
   }
 }
 function renderProject(next, fit = true) {
+  if (fit) $('export-format').value = next.format || 'universal';
   const oldPalette = project?.palette;
   project = next;
   if (!fit && oldPalette) project.palette = oldPalette;
@@ -333,7 +334,11 @@ $('export-button').onclick = () =>
   run('Saving geometry and native paint assignments…', async () => {
     const ids =
         $('export-scope').value === 'selected' ? [selectedId] : project.pieces.map((p) => p.id),
-      bytes = await request('export', { ids, palette: project.palette });
+      bytes = await request('export', {
+        ids,
+        palette: project.palette,
+        options: { format: $('export-format').value },
+      });
     const url = URL.createObjectURL(new Blob([bytes], { type: 'model/3mf' })),
       link = document.createElement('a');
     link.href = url;
@@ -345,7 +350,7 @@ $('export-button').onclick = () =>
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
     toast(
-      'Painted 3MF download prepared. Keep material slots in the same order in PrusaSlicer.',
+      'Mesh-and-paint 3MF prepared. Use your slicer’s current printer and keep material slots in the same order.',
     );
   });
 $('cancel').onclick = () => {

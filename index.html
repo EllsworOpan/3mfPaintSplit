@@ -169,6 +169,13 @@
           <div id="palette" class="palette"><span class="muted">Colors from your 3MF</span></div>
         </section>
         <section class="export-panel">
+          <div class="field">
+            <label for="export-format">Target slicer</label>
+            <select id="export-format" disabled>
+              <option value="universal">PrusaSlicer 2 · Bambu · Orca</option>
+              <option value="prusa3">PrusaSlicer 3 (experimental)</option>
+            </select>
+          </div>
           <div class="label-row">
             <label for="export-scope">Export</label
             ><select id="export-scope" disabled>
@@ -179,7 +186,7 @@
           <button id="export-button" class="export-button" disabled>
             ↓ <span>Save painted 3MF</span><span id="export-count">0</span>
           </button>
-          <p>Separate objects, ready to orient in PrusaSlicer.</p>
+          <p>Meshes and paint only. Uses your slicer’s current printer.</p>
         </section>
       </aside>
     </main>
@@ -194,7 +201,9 @@
       <ol>
         <li>
           <strong>Open a painted 3MF.</strong> Native PrusaSlicer MMU and Bambu / Orca AMS paint are
-          read, including paint inside individual triangles.
+          read, including paint inside individual triangles. Unreadable optional palette settings
+          are skipped automatically while retaining paint material numbers. Check the colors if a
+          recovery warning appears. Invalid geometry, paint, or part roles still stop the import.
         </li>
         <li>
           <strong>Position the plane.</strong> Choose X, Y, or Z, change the offset, or tilt and
@@ -205,9 +214,10 @@
           Undo keeps the last 12 cuts.
         </li>
         <li>
-          <strong>Save the painted 3MF.</strong> Import it into PrusaSlicer as separate objects,
-          keep the same material slot order, choose your printer and filaments, then orient each
-          piece for printing.
+          <strong>Save the painted 3MF.</strong> Choose your target slicer, import as separate
+          objects, keep the same material slot order in your current printer setup, then orient each
+          piece for printing. Exports contain no printer or print configuration. PrusaSlicer 3 uses
+          a separate paint format; select its experimental export when using version 3.
         </li>
       </ol>
       <p>

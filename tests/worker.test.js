@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
 import { import3mf, export3mf } from '../src/three-mf.js';
 import { cubeMesh } from '../src/demo.js';
+import { unzipSync, zipSync, strToU8 } from 'fflate';
 import { paintedSquare, PALETTE } from './helpers/painted-square.js';
 import { assertPaintAtOriginalPositions } from './helpers/spatial-assertions.js';
 
@@ -30,6 +31,29 @@ function session(t) {
     });
 }
 const load = (rpc) => rpc('import', { buffer: paintedSquare(), filename: 'complex.3mf' });
+
+test('worker automatically recovers unreadable palettes and retains paint through export', async (t) => {
+  const rpc = session(t),
+    source = await load(rpc);
+  const files = unzipSync(export3mf(source.pieces, source.palette));
+  files['Metadata/project_settings.config'] = strToU8('{broken');
+  const buffer = zipSync(files);
+  const recovered = await rpc('import', {
+    buffer,
+    filename: 'recover.3mf',
+  });
+  assert.ok(recovered.warnings.some((w) => w.includes('Unreadable project palette')));
+  assert.deepEqual(recovered.palette, source.palette);
+  assertPaintAtOriginalPositions(recovered.pieces[0]);
+  const exported = await rpc('export', {
+    ids: recovered.pieces.map((p) => p.id),
+    palette: recovered.palette,
+    options: { format: 'prusa3' },
+  });
+  const reloaded = import3mf(exported);
+  assert.equal(reloaded.format, 'prusa3');
+  assertPaintAtOriginalPositions(reloaded.pieces[0]);
+});
 
 test('actual worker imports complex paint, cuts it, and exports only the selected piece', async (t) => {
   const rpc = session(t),

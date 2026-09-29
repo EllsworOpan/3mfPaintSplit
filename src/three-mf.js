@@ -3,6 +3,7 @@ import { DOMParser } from '@xmldom/xmldom';
 import { Matrix4, Vector3 } from 'three';
 import { decodePaint, encodePaint } from './paint.js';
 import { conformPaint, makeMesh, meshHealth, MAX_FACES } from './geometry.js';
+import { readPrusaPaint } from './prusa-paint.js';
 
 export const DEFAULT_COLORS = [
   '#70C6B4',
@@ -60,14 +61,24 @@ function matrix(value) {
   );
 }
 function pathOf(path, base = '') {
-  const parts = (path.startsWith('/') ? path : base.slice(0, base.lastIndexOf('/') + 1) + path)
-      .replaceAll('\\', '/')
-      .split('/'),
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    throw new Error('Invalid encoded 3MF resource path.');
+  }
+  if (!path || /[?#\x00-\x1f]|^[a-z][a-z\d+.-]*:/i.test(path))
+    throw new Error('Invalid or external 3MF resource path.');
+  path = path.replaceAll('\\', '/');
+  const parts = (
+      path.startsWith('/') ? path : base.slice(0, base.lastIndexOf('/') + 1) + path
+    ).split('/'),
     result = [];
   for (const p of parts) {
     if (!p || p === '.') continue;
-    if (p === '..') result.pop();
-    else result.push(p);
+    if (p === '..') {
+      if (!result.length) throw new Error('A 3MF resource path escapes the archive.');
+      result.pop();
+    } else result.push(p);
   }
   return result.join('/');
 }
@@ -90,95 +101,155 @@ function requiredNumber(element, name) {
 export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
   if (buffer.byteLength > 200 * 1024 * 1024)
     throw new Error('This file exceeds the 200 MB browser import limit.');
-  let expanded = 0;
+  let expanded = 0,
+    entries = 0;
+  const sidecars = new Set([
+    '_rels/.rels',
+    'metadata/slic3r_pe.config',
+    'metadata/slic3r_pe_model.config',
+    'metadata/model_settings.config',
+    'metadata/project_settings.config',
+    'metadata/prusaslicer3_project.json',
+    'metadata/slic3r_facets_annotation.json',
+  ]);
+  const archivePaths = new Set();
   const files = unzipSync(new Uint8Array(buffer), {
     filter: (file) => {
-      // Do not inflate embedded G-code, thumbnails, textures, or other assets.
-      if (!/\.model$|\.config$|\.rels$|project_settings\.config$/i.test(file.name)) return false;
+      if (++entries > 10000) throw new Error('The 3MF contains too many archive entries.');
+      const path = pathOf(file.name).toLowerCase();
+      if (archivePaths.has(path)) throw new Error('Duplicate 3MF archive resource path.');
+      archivePaths.add(path);
+      // Only mesh, paint, roles, material assignments and palette sources.
+      // Never inflate G-code, textures, or unrelated slicer settings/annotations.
+      if (!/\.model$/i.test(path) && !sidecars.has(path)) return false;
       expanded += file.originalSize;
       if (expanded > 400 * 1024 * 1024)
         throw new Error('The expanded 3MF exceeds the 400 MB browser memory limit.');
       return true;
     },
   });
-  const read = (path) => (files[path] ? strFromU8(files[path]) : null);
+  const filePaths = new Map(Object.keys(files).map((p) => [pathOf(p).toLowerCase(), p]));
+  const read = (path) => {
+    const actual = filePaths.get(path.toLowerCase());
+    return actual === undefined ? null : strFromU8(files[actual]);
+  };
   let root = '3D/3dmodel.model';
   if (read('_rels/.rels')) {
     const rel = descendants(xml(read('_rels/.rels')), 'Relationship').find((r) =>
       (r.getAttribute('Type') || '').endsWith('/3dmodel'),
     );
-    if (rel) root = pathOf(rel.getAttribute('Target'));
+    if (rel) {
+      if (rel.getAttribute('TargetMode') === 'External')
+        throw new Error('External 3MF model relationships are not supported.');
+      root = pathOf(rel.getAttribute('Target'));
+    }
   }
   if (!read(root)) throw new Error('No 3D model was found in this 3MF archive.');
   const cache = new Map(),
     warnings = [],
     palette = [];
+  const prusa3 = readPrusaPaint(read);
+  const setPalette = (colors) => {
+    if (colors.length > 255) throw new Error('This palette exceeds the 255 material limit.');
+    for (const value of colors) {
+      const c = typeof value === 'string' ? value.trim() : '';
+      palette.push(
+        /^#[\da-f]{6}(?:[\da-f]{2})?$/i.test(c)
+          ? c.slice(0, 7)
+          : DEFAULT_COLORS[palette.length % DEFAULT_COLORS.length],
+      );
+    }
+  };
+  if (prusa3) {
+    warnings.push('Experimental PrusaSlicer 3 paint import (validated with 3.0.0-alpha12).');
+    if (prusa3.palettes.length) setPalette(prusa3.palettes[0]);
+    if (prusa3.palettes.some((p) => JSON.stringify(p) !== JSON.stringify(prusa3.palettes[0])))
+      warnings.push(
+        'The project has different palettes on different beds. Material slot numbers are preserved; the first palette is shown.',
+      );
+  }
   const config = read('Metadata/Slic3r_PE.config') || '';
   const colors =
     config.match(/^;?\s*extruder_colour\s*=\s*(.+)$/m)?.[1] ||
     config.match(/^;?\s*filament_colour\s*=\s*(.+)$/m)?.[1];
-  if (colors)
-    for (const c of colors.split(';'))
-      palette.push(
-        /^#[\da-f]{6}/i.test(c.trim())
-          ? c.trim().slice(0, 7)
-          : DEFAULT_COLORS[palette.length % DEFAULT_COLORS.length],
-      );
+  if (!palette.length && colors) setPalette(colors.split(';'));
   const bambuSettings = read('Metadata/project_settings.config');
   if (!palette.length && bambuSettings)
     try {
       const settings = JSON.parse(bambuSettings),
-        colors = settings.filament_colour || settings.filament_color;
-      if (Array.isArray(colors))
-        for (const c of colors)
-          palette.push(
-            /^#[\da-f]{6}/i.test(c)
-              ? c.slice(0, 7)
-              : DEFAULT_COLORS[palette.length % DEFAULT_COLORS.length],
-          );
+        colors = settings.filament_colour || settings.filament_color || settings.extruder_colour;
+      if (colors !== undefined && !Array.isArray(colors)) throw new Error('Invalid palette.');
+      if (colors) setPalette(colors);
     } catch {
-      /* Some older project configs are not JSON. */
+      warnings.push(
+        'Unreadable project palette settings were ignored. Paint material numbers are preserved; check the display colors.',
+      );
     }
-  const objectSettings = new Map(),
-    bambuParts = new Map();
+  const objectSettings = new Map();
+  const metadataOf = (el) =>
+    Object.fromEntries(
+      children(el, 'metadata')
+        .filter((m) =>
+          ['name', 'extruder', 'modifier', 'volume_type'].includes(m.getAttribute('key')),
+        )
+        .map((m) => [m.getAttribute('key'), m.getAttribute('value')]),
+    );
   const prusaConfig = read('Metadata/Slic3r_PE_model.config');
   if (prusaConfig)
     for (const o of descendants(xml(prusaConfig), 'object')) {
-      const metadata = Object.fromEntries(
-        children(o, 'metadata').map((m) => [m.getAttribute('key'), m.getAttribute('value')]),
-      );
+      const metadata = metadataOf(o);
       const volumes = children(o, 'volume').map((v) => ({
-        first: Number(v.getAttribute('firstid')),
-        last: Number(v.getAttribute('lastid')),
-        meta: Object.fromEntries(
-          children(v, 'metadata').map((m) => [m.getAttribute('key'), m.getAttribute('value')]),
-        ),
+        first: requiredNumber(v, 'firstid'),
+        last: requiredNumber(v, 'lastid'),
+        meta: metadataOf(v),
       }));
+      if (objectSettings.has(o.getAttribute('id')))
+        throw new Error('Duplicate 3MF object settings.');
       objectSettings.set(o.getAttribute('id'), { metadata, volumes });
     }
   const bambuConfig = read('Metadata/model_settings.config');
+  if (prusa3 && (prusaConfig || bambuConfig))
+    throw new Error(
+      'Mixed PrusaSlicer 3 and legacy object metadata is ambiguous. Save the project in its slicer first.',
+    );
   if (bambuConfig)
     for (const o of descendants(xml(bambuConfig), 'object')) {
-      const metadata = Object.fromEntries(
-        children(o, 'metadata').map((m) => [m.getAttribute('key'), m.getAttribute('value')]),
-      );
-      if (!objectSettings.has(o.getAttribute('id')))
-        objectSettings.set(o.getAttribute('id'), { metadata, volumes: [] });
-      for (const p of children(o, 'part'))
-        bambuParts.set(p.getAttribute('id'), {
-          ...Object.fromEntries(
-            children(p, 'metadata').map((m) => [m.getAttribute('key'), m.getAttribute('value')]),
-          ),
+      if (objectSettings.has(o.getAttribute('id')))
+        throw new Error('Ambiguous or mixed 3MF object settings.');
+      objectSettings.set(o.getAttribute('id'), {
+        metadata: metadataOf(o),
+        volumes: [],
+        parts: children(o, 'part').map((p) => ({
+          id: p.getAttribute('id'),
+          metadata: metadataOf(p),
           subtype: p.getAttribute('subtype'),
-        });
+        })),
+      });
     }
+  if (prusa3) for (const [id, settings] of prusa3.objects) objectSettings.set(id, settings);
   function model(path) {
+    path = path.toLowerCase();
     if (cache.has(path)) return cache.get(path);
     const content = read(path);
     if (!content) throw new Error(`Missing 3MF component: ${path}`);
     const doc = xml(content),
       el = doc.documentElement,
       resources = child(el, 'resources');
+    if (el.localName !== 'model' || !resources) throw new Error('Invalid 3MF model resources.');
+    const ids = new Set();
+    for (const resource of Array.from(resources.childNodes).filter((e) => e.nodeType === 1)) {
+      const id = resource.getAttribute('id');
+      if (!/^\d+$/.test(id || '') || Number(id) < 1 || ids.has(id))
+        throw new Error('Invalid or duplicate 3MF resource ID.');
+      ids.add(id);
+    }
+    const application =
+      children(el, 'metadata').find((m) => m.getAttribute('name') === 'Application')?.textContent ||
+      '';
+    if (/^PrusaSlicer[-\s]+(?:[3-9]|\d{2,})\./i.test(application) && !prusa3)
+      throw new Error(
+        'Missing PrusaSlicer 3 project/paint metadata. Save an editable 3MF in PrusaSlicer first.',
+      );
     const unit = {
       micron: 0.001,
       millimeter: 1,
@@ -198,14 +269,17 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
           .map((e) => [e.getAttribute('id'), e]),
       ),
     };
-    const ver = children(el, 'metadata').find(
-      (m) => m.getAttribute('name') === 'slic3rpe:MmPaintingVersion',
+    const versions = children(el, 'metadata').filter((m) =>
+      /^(?:slic3rpe|BambuStudio|OrcaSlicer):MmPaintingVersion$/.test(m.getAttribute('name')),
     );
-    if (ver && Number(ver.textContent) > 2)
+    if (versions.some((v) => ![0, 1, 2].includes(Number(v.textContent))))
       throw new Error(
         'This 3MF uses a newer paint format. Save a PrusaSlicer 2.x compatible 3MF first.',
       );
-    data.paintVersion = Number(ver?.textContent || 0);
+    data.paintVersion = Number(
+      versions.find((v) => v.getAttribute('name') === 'slic3rpe:MmPaintingVersion')?.textContent ||
+        0,
+    );
     if (!palette.length) {
       const groups = [...data.resources.values()].filter((r) => r.localName === 'colorgroup');
       if (groups.length === 1) {
@@ -222,8 +296,11 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
   let sourceTriangles = 0,
     paintedTriangles = 0,
     resolved = 0,
-    skipped = 0;
-  function visit(path, id, transform, stack = [], inherited = 1) {
+    skipped = 0,
+    visits = 0;
+  function visit(path, id, transform, stack = [], inherited = 1, context = {}) {
+    path = path.toLowerCase();
+    if (++visits > 100000) throw new Error('The 3MF contains too many component instances.');
     const key = path + '#' + id;
     if (stack.includes(key) || stack.length > 40)
       throw new Error('Cyclic or excessively nested 3MF components.');
@@ -234,42 +311,106 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
       skipped++;
       return;
     }
-    const settings = objectSettings.get(id),
-      part = bambuParts.get(id);
+    const settings = path === root.toLowerCase() ? objectSettings.get(id) : undefined,
+      part = context.part;
+    if (
+      part?.subtype &&
+      ![
+        'normal_part',
+        'negative_part',
+        'modifier_part',
+        'support_enforcer',
+        'support_blocker',
+      ].includes(part.subtype)
+    )
+      throw new Error(`Unsupported Bambu/Orca part role: ${part.subtype}.`);
     if (part?.subtype && part.subtype !== 'normal_part') {
       skipped++;
       return;
     }
-    const fallback = positiveInt(part?.extruder || settings?.metadata.extruder, inherited);
+    if (part?.role && part.role !== 'ModelPart') {
+      skipped++;
+      return;
+    }
+    const fallback = positiveInt(
+      part?.metadata.extruder,
+      positiveInt(settings?.metadata.extruder, inherited),
+    );
     const mesh = child(obj, 'mesh'),
       components = child(obj, 'components');
     const baseName =
+      part?.metadata.name ||
       settings?.metadata.name ||
-      part?.name ||
+      context.name ||
       obj.getAttribute('name') ||
       filename.replace(/\.3mf$/i, '');
-    if (components)
-      for (const c of children(components, 'component')) {
+    if (mesh && components)
+      throw new Error('A 3MF object cannot contain both mesh and components.');
+    if (components) {
+      const refs = children(components, 'component');
+      if (
+        settings?.parts?.length &&
+        (settings.parts.length !== refs.length ||
+          settings.parts.some((p, i) => p.id !== refs[i].getAttribute('objectid')))
+      )
+        throw new Error('Part settings do not match the 3MF components.');
+      if (part?.paint && refs.length !== 1)
+        throw new Error('PrusaSlicer 3 paint must refer to a single mesh per volume.');
+      for (const [index, c] of refs.entries()) {
         const nextPath = attr(c, 'path') ? pathOf(attr(c, 'path'), path) : path;
+        const scale = model(nextPath).unit / data.unit;
         visit(
           nextPath,
           c.getAttribute('objectid'),
-          transform.clone().multiply(matrix(c.getAttribute('transform'))),
+          transform
+            .clone()
+            .multiply(matrix(c.getAttribute('transform')))
+            .scale(new Vector3(scale, scale, scale)),
           [...stack, key],
           fallback,
+          { part: settings?.parts?.[index] || part, name: baseName },
         );
       }
+    }
     if (!mesh) return;
+    if (settings?.parts?.length)
+      throw new Error(
+        'Part metadata expects components, but this object contains a combined mesh. Save it again in its slicer first.',
+      );
+    if (!Number.isFinite(transform.determinant()) || transform.determinant() === 0)
+      throw new Error('Invalid or collapsed 3MF object transform.');
     const verts = children(child(mesh, 'vertices'), 'vertex').map((v) => {
       const p = ['x', 'y', 'z'].map((k) => requiredNumber(v, k));
-      if (!p.every(Number.isFinite)) throw new Error('The mesh contains an invalid vertex.');
-      return new Vector3(...p).applyMatrix4(transform).multiplyScalar(data.unit).toArray();
+      const result = new Vector3(...p).applyMatrix4(transform).toArray();
+      if (!result.every(Number.isFinite))
+        throw new Error('The mesh contains an invalid transformed vertex.');
+      return result;
     });
     const triangles = children(child(mesh, 'triangles'), 'triangle');
     sourceTriangles += triangles.length;
+    if (sourceTriangles > MAX_FACES)
+      throw new Error('The model exceeds the 1.5 million triangle import limit.');
+    if (part?.paint && [...part.paint.keys()].some((i) => i >= triangles.length))
+      throw new Error('PrusaSlicer 3 paint references a missing triangle.');
     const groups = settings?.volumes.length
       ? settings.volumes
       : [{ first: 0, last: triangles.length - 1, meta: {} }];
+    let nextTriangle = 0;
+    for (const group of [...groups].sort((a, b) => a.first - b.first)) {
+      if (
+        !Number.isInteger(group.first) ||
+        !Number.isInteger(group.last) ||
+        group.first !== nextTriangle ||
+        group.last < group.first ||
+        group.last >= triangles.length
+      )
+        throw new Error(
+          'Invalid, overlapping or incomplete volume triangle range in 3MF metadata.',
+        );
+      nextTriangle = group.last + 1;
+    }
+    if (nextTriangle !== triangles.length)
+      throw new Error('Incomplete volume triangle ranges in 3MF metadata.');
     for (const group of groups) {
       if (
         group.meta.modifier === '1' ||
@@ -287,14 +428,28 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
         if (indices.some((i) => !Number.isInteger(i) || i < 0 || i >= verts.length))
           throw new Error('A triangle references a missing vertex.');
         const points = indices.map((i) => verts[i]);
-        const prusa = attr(t, 'mmu_segmentation'),
+        const prusa = part?.paint?.get(i) ?? attr(t, 'mmu_segmentation'),
           bambu = attr(t, 'paint_color');
+        if (
+          part?.paint?.has(i) &&
+          attr(t, 'mmu_segmentation') &&
+          prusa !== attr(t, 'mmu_segmentation')
+        )
+          throw new Error('Conflicting XML and JSON triangle paint.');
         let material = defaultMaterial;
         if (!prusa && !bambu) {
           const pid = t.getAttribute('pid') || obj.getAttribute('pid'),
             p1 = t.getAttribute('p1') || obj.getAttribute('pindex') || '0',
             resource = data.resources.get(pid);
           if (resource) {
+            if (!['basematerials', 'colorgroup'].includes(resource.localName))
+              throw new Error(
+                'Texture and composite 3MF materials are not supported. Convert them to slicer paint first.',
+              );
+            if (['p2', 'p3'].some((k) => t.hasAttribute(k) && t.getAttribute(k) !== p1))
+              throw new Error(
+                'Interpolated vertex colors are not supported. Convert them to slicer paint first.',
+              );
             const entries = children(
                 resource,
                 resource.localName === 'basematerials' ? 'base' : 'color',
@@ -333,7 +488,11 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
         for (const leaf of leaves) decoded.push(leaf);
       }
       progress(`Resolving paint on ${baseName}…`);
+      const leafCount = decoded.length;
       decoded = conformPaint(decoded);
+      resolved += decoded.length - leafCount;
+      if (resolved > MAX_FACES)
+        throw new Error('Conforming paint exceeds the 1.5 million triangle limit.');
       const piece = makeMesh(decoded, group.meta.name || baseName);
       if (piece.faces.length) {
         piece.health = meshHealth(piece);
@@ -345,15 +504,30 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
     build = child(rootData.el, 'build');
   const items = children(build, 'item');
   if (!items.length) throw new Error('This 3MF has no build items.');
-  for (const item of items) {
-    if (item.getAttribute('printable') === '0') {
+  if (prusa3)
+    for (const [index, instance] of prusa3.instances) {
+      if (!items[index] || items[index].getAttribute('objectid') !== instance.id)
+        throw new Error('PrusaSlicer 3 instance metadata does not match the build.');
+    }
+  for (const [index, item] of items.entries()) {
+    if (
+      ['0', 'false'].includes(item.getAttribute('printable')) ||
+      prusa3?.instances.get(index)?.printable === false
+    ) {
       skipped++;
       continue;
     }
+    const itemPath = attr(item, 'path') ? pathOf(attr(item, 'path'), root) : root;
+    if (prusa3 && (itemPath !== root || !objectSettings.has(item.getAttribute('objectid'))))
+      throw new Error('Missing PrusaSlicer 3 object metadata.');
+    const scale = model(itemPath).unit / rootData.unit;
     visit(
-      attr(item, 'path') ? pathOf(attr(item, 'path'), root) : root,
+      itemPath,
       item.getAttribute('objectid'),
-      matrix(item.getAttribute('transform')),
+      new Matrix4()
+        .makeScale(rootData.unit, rootData.unit, rootData.unit)
+        .multiply(matrix(item.getAttribute('transform')))
+        .scale(new Vector3(scale, scale, scale)),
     );
   }
   if (!pieces.length) throw new Error('No printable model geometry was found.');
@@ -375,14 +549,44 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
     warnings.push(
       'Some pieces have open or inconsistent edges. They can be viewed, but must be repaired before cutting.',
     );
-  return { pieces, palette, warnings, filename, sourceTriangles, paintedTriangles };
+  return {
+    pieces,
+    palette,
+    warnings,
+    filename,
+    sourceTriangles,
+    paintedTriangles,
+    format: prusa3 ? 'prusa3' : 'universal',
+  };
 }
 
-export function export3mf(pieces, palette) {
+export function export3mf(pieces, palette, options = {}) {
+  const format = options.format || 'universal';
+  if (!['universal', 'prusa3'].includes(format)) throw new Error('Unknown 3MF export format.');
+  const prusa3 = format === 'prusa3';
   if (!pieces.length) throw new Error('Select at least one piece to export.');
+  if (
+    !Array.isArray(palette) ||
+    !palette.length ||
+    palette.length > 255 ||
+    palette.some((c) => !/^#[\da-f]{6}$/i.test(c))
+  )
+    throw new Error('Export requires 1–255 valid material colors.');
+  if (
+    pieces.some(
+      (p) =>
+        !p.faces.length ||
+        p.faces.some(
+          (f) => !Number.isInteger(f.material) || f.material < 1 || f.material > palette.length,
+        ),
+    )
+  )
+    throw new Error('Every exported face needs a material slot present in the palette.');
   const paintVersion = pieces.some((piece) => piece.faces.some((face) => face.material > 16))
     ? 2
     : 1;
+  const meshId = (i) => 2 + i * (prusa3 ? 3 : 1);
+  const objectId = (i) => meshId(i) + (prusa3 ? 2 : 0);
   const objects = pieces
     .map((piece, index) => {
       const vertices = piece.vertices
@@ -394,23 +598,57 @@ export function export3mf(pieces, palette) {
             `<triangle v1="${f.v[0]}" v2="${f.v[1]}" v3="${f.v[2]}" slic3rpe:mmu_segmentation="${encodePaint(f.material)}" paint_color="${encodePaint(f.material, 'bambu')}" pid="1" p1="${f.material - 1}"/>`,
         )
         .join('');
-      return `<object id="${index + 2}" type="model" name="${xmlEscape(piece.name)}"><mesh><vertices>${vertices}</vertices><triangles>${faces}</triangles></mesh></object>`;
+      const id = meshId(index),
+        name = xmlEscape(piece.name);
+      return (
+        `<object id="${id}" type="model" name="${name}"><mesh><vertices>${vertices}</vertices><triangles>${faces}</triangles></mesh></object>` +
+        (prusa3
+          ? `<object id="${id + 1}" type="model" name="${name}"><components><component objectid="${id}"/></components></object><object id="${id + 2}" type="model" name="${name}"><components><component objectid="${id + 1}"/></components></object>`
+          : '')
+      );
     })
     .join('');
-  const model = `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"><metadata name="Application">3MF Paint Split 1.0</metadata><metadata name="slic3rpe:Version3mf">1</metadata><metadata name="slic3rpe:MmPaintingVersion">${paintVersion}</metadata><resources><m:colorgroup id="1">${palette.map((c) => `<m:color color="${xmlEscape(c)}FF"/>`).join('')}</m:colorgroup>${objects}</resources><build>${pieces.map((_, i) => `<item objectid="${i + 2}"/>`).join('')}</build></model>`;
-  const modelConfig = `<?xml version="1.0"?><config>${pieces.map((p, i) => `<object id="${i + 2}" instances_count="1"><metadata type="object" key="name" value="${xmlEscape(p.name)}"/><volume firstid="0" lastid="${p.faces.length - 1}"><metadata type="volume" key="name" value="${xmlEscape(p.name)}"/><metadata type="volume" key="volume_type" value="ModelPart"/><metadata type="volume" key="extruder" value="1"/></volume></object>`).join('')}</config>`;
-  const config = `; generated by 3MF Paint Split\n; extruder_colour = ${palette.join(';')}\n; filament_colour = ${palette.join(';')}\n; nozzle_diameter = ${palette.map(() => 0.4).join(',')}\n; filament_diameter = ${palette.map(() => 1.75).join(',')}\n`;
+  const model = `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"><metadata name="Application">3MF Paint Split 1.0</metadata><metadata name="slic3rpe:Version3mf">1</metadata><metadata name="slic3rpe:MmPaintingVersion">${paintVersion}</metadata><resources><m:colorgroup id="1">${palette.map((c) => `<m:color color="${xmlEscape(c)}FF"/>`).join('')}</m:colorgroup>${objects}</resources><build>${pieces.map((_, i) => `<item objectid="${objectId(i)}"/>`).join('')}</build></model>`;
+  // PrusaSlicer 3 no longer imports legacy XML paint reliably. Its native JSON
+  // sidecars hold ONLY volume identity and paint; an empty container list lets
+  // the slicer use the user's own profiles and physical material slots.
+  const annotations = prusa3
+    ? {
+        'Metadata/PrusaSlicer3_project.json': strToU8(
+          JSON.stringify({
+            project: { id: '00000000-0000-4000-8000-000000000001', version: 0 },
+            objects: pieces.map((_, i) => ({
+              id: objectId(i),
+              object_settings: {},
+              volumes: [{ id: meshId(i) + 1, type: 'ModelPart', volume_settings: {} }],
+            })),
+            config_containers: [],
+          }),
+        ),
+        'Metadata/Slic3r_facets_annotation.json': strToU8(
+          JSON.stringify(
+            pieces.map((p, i) => ({
+              id: meshId(i) + 1,
+              mmSegmentationFacetsVersion: paintVersion,
+              mmSegmentationFacets: p.faces.map((f, triangle) => ({
+                triangle,
+                dividing: encodePaint(f.material),
+              })),
+            })),
+          ),
+        ),
+      }
+    : {};
   return zipSync(
     {
       '[Content_Types].xml': strToU8(
-        '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/><Default Extension="config" ContentType="application/xml"/></Types>',
+        `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>${prusa3 ? '<Default Extension="json" ContentType="application/json"/>' : ''}</Types>`,
       ),
       '_rels/.rels': strToU8(
         '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>',
       ),
       '3D/3dmodel.model': strToU8(model),
-      'Metadata/Slic3r_PE_model.config': strToU8(modelConfig),
-      'Metadata/Slic3r_PE.config': strToU8(config),
+      ...annotations,
     },
     { level: 6 },
   );

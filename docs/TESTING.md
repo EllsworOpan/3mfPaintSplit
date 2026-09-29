@@ -10,11 +10,13 @@ npm run test:model
 
 `npm test` runs the complete suite. `test:coverage` reports the core processing modules; the browser UI and Three.js renderer are not included in that percentage. `test:model` regenerates two downloadable examples and the comparison diagram from the same independently defined fixture used in the tests.
 
-The optional native integration tests use `PRUSA_SLICER` or the standard Windows PrusaSlicer installation. They skip with an explicit test result when no executable is available. On this development machine all **81 tests passed, with zero skips**, including both native PrusaSlicer 2.9.6 integration tests. Measured core coverage was **96.05% of lines and 91.52% of branches** on Node.js 24.11.1.
+The optional native integration tests use `PRUSA_SLICER`, `BAMBU_STUDIO`, `ORCA_SLICER`, and `PRUSA_SLICER3`. They skip with an explicit test result when an executable is unavailable. The PrusaSlicer 3 test uses a separate profile directory under `.tmp`, and selects the native JSON paint export. The other slicers use the three-file mesh-and-paint export. Both formats deliberately omit printer profiles.
+
+Validation on September 29, 2026: **109 tests passed, zero failures and zero skips**, including native CLI saves in PrusaSlicer 2.9.6, Bambu Studio 2.8.2.61, OrcaSlicer 2.4.2 and PrusaSlicer 3.0.0-alpha12. The production build and example generation also passed. A browser check verified import, PrusaSlicer 3 format selection, and the cut workflow.
 
 The GitHub `Test application` workflow runs tests and production builds on Windows and Linux with Node.js 22 for pushes and pull requests. Native PrusaSlicer tests are skipped on those runners unless the slicer is separately installed. GitHub Pages publishing also runs the tests before deployment.
 
-The suite was also run in the `node:22-alpine` Linux Docker image: **79 passed, zero failed, and the two native PrusaSlicer tests skipped** because that container has no slicer installation.
+Committed native fixtures cover PrusaSlicer 2.9.6, Bambu Studio 2.8.2.61, OrcaSlicer 2.4.2, and PrusaSlicer 3.0.0-alpha12 even on hosts without the slicers. See `tests/fixtures/README.md` for provenance. Synthetic fixtures separately exercise JSON partial-triangle paint, invalid annotations, scoped external IDs, mixed model units, automatic palette recovery, and rejection of unsupported virtual material recipes.
 
 ## The requested use case
 
@@ -51,15 +53,17 @@ To reproduce the example cut in the app, set Tilt to **90°**, Azimuth to **63.4
 
 ## Suite map
 
-| Suite                         | Coverage                                                                                                 |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `complex-paint.test.js`       | Two original triangles, complex native paint, exact spatial checks, cuts and export                      |
-| `complex-prusa.test.js`       | Complex paint through real PrusaSlicer saves before and after two cuts                                   |
-| `paint-codec.test.js`         | Every split-side arrangement, exact child positions, mixed nested splits, unpainted fallback             |
-| `geometry-regression.test.js` | Deterministic plane sweep, scale/translation, nested holes/islands, invalid cut parameters               |
-| `import-validation.test.js`   | Missing/malformed fields, material defaults, instances, component cycles, palette sources                |
-| `worker.test.js`              | Actual worker protocol, selected-piece export, failed operations, 12-step undo, cancellation restoration |
-| `core.test.js`                | Extended material slots in both dialects, conformity, hollows, transforms, core 3MF round trips          |
-| `prusa.test.js`               | Native PrusaSlicer round trip with extended material indices                                             |
+| Suite                          | Coverage                                                                                                         |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `complex-paint.test.js`        | Two original triangles, complex native paint, exact spatial checks, cuts and export                              |
+| `complex-prusa.test.js`        | Complex paint through real PrusaSlicer saves before and after two cuts                                           |
+| `paint-codec.test.js`          | Every split-side arrangement, exact child positions, mixed nested splits, unpainted fallback                     |
+| `geometry-regression.test.js`  | Deterministic plane sweep, scale/translation, nested holes/islands, invalid cut parameters                       |
+| `import-validation.test.js`    | Missing/malformed fields, material defaults, instances, component cycles, palette sources                        |
+| `worker.test.js`               | Actual worker protocol, selected-piece export, failed operations, 12-step undo, cancellation restoration         |
+| `core.test.js`                 | Extended material slots in both dialects, conformity, hollows, transforms, core 3MF round trips                  |
+| `prusa.test.js`                | Native PrusaSlicer round trip with extended material indices                                                     |
+| `slicer-formats.test.js`       | Native fixtures, automatic palette recovery, JSON paint, profile-free archives, scoped parts, malformed metadata |
+| `slicer-compatibility.test.js` | Native Bambu, Orca, and PrusaSlicer 3 saves; spatial paint and material 18                                       |
 
 The tests do not cover every possible damaged or self-intersecting mesh, virtual-material recipe, printer profile, or future slicer format. They also do not automate browser visual rendering; those are separate from the geometry and paint guarantees tested here.
