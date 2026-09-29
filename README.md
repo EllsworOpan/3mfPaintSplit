@@ -89,7 +89,7 @@ Tests use generated fixtures. Validate the first export of your own miniature in
 | -------------------- | ----------------------------------------------------- |
 | `src/paint.js`       | Shared paint API compatibility export               |
 | `src/geometry.js`    | Conforming edges, plane clipping, caps and validation |
-| `src/three-mf.js`    | App mesh adapter for ThreeMFKit     |
+| `src/three-mf.js`    | App mesh adapter for 3MF import/export     |
 | `src/worker.js`      | Processing, cut history and export off the UI thread  |
 | `src/viewer.js`      | Three.js viewer, orbit controls and plane gizmo       |
 | `src/main.js`        | User interface and workflow                           |
@@ -100,8 +100,6 @@ Three.js, fflate, earcut, and xmldom retain their respective upstream licenses. 
 
 This project is licensed under the [MIT License](LICENSE). The third-party dependencies retain their own licenses.
 
-## Shared 3MF API
+## Included 3MF support
 
-3MF reading, writing, paint encoding, target capabilities and slicer setting mappings live in the sibling **ThreeMFKit** project. This app consumes its checked-in browser build under `src/vendor/three-mf`; publishing needs no sibling checkout, package server or extra network dependency. App geometry processing stays here. Make format fixes in ThreeMFKit, then run its `npm run build` and `npm run sync -- --verify` to copy and test the same build in all three apps. The script refuses manual vendor edits and defaults to copying only. Use `npm run sync -- --commit --dry-run` to preview an update without writing files or changing Git; `npm run sync -- --commit` copies, verifies all apps and commits only managed API files with a standardized message. It never pushes. For the initial migration, app integration changes outside the vendor folder must also be committed before release.
-
-The API retains source archives for same-format updates, cleanly replaces edited models, and supports cross-format conversion through clean export. Region numbers stay separate even when display colors match. See the library's README and format evidence for the document model and preservation rules.
+The browser code for 3MF handling is included in [src/vendor/three-mf](src/vendor/three-mf). It is part of the normal development and publishing workflow described above.
