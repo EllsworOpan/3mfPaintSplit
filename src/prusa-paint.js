@@ -96,18 +96,18 @@ export function readPrusaPaint(read) {
   for (const object of objects.values())
     for (const part of object.parts) part.paint = painting.get(part.id) ?? new Map();
   const palettes = [];
-  for (const value of list(data.config_containers ?? [])) {
-    const container = record(value);
-    if (list(container.virtual_extruders ?? []).length)
-      throw new Error(
-        'PrusaSlicer 3 blend/gradient materials cannot be preserved as physical paint slots. Convert them to physical materials in PrusaSlicer before importing.',
-      );
-    const config = record(container.configuration ?? {});
-    const projectColors = record(config.project_settings ?? {}).extruder_colour;
-    const filamentColors = record(config.filament_settings ?? {}).filament_colour;
+  let flattenedRecipes = false;
+  // Configuration is optional display information, never a dependency of paint.
+  // Virtual slot IDs remain ordinary region labels; their recipes are discarded.
+  for (const container of Array.isArray(data.config_containers) ? data.config_containers : []) {
+    if (!container || typeof container !== 'object') continue;
+    if (Array.isArray(container.virtual_extruders) && container.virtual_extruders.length)
+      flattenedRecipes = true;
+    const projectColors = container.configuration?.project_settings?.extruder_colour;
+    const filamentColors = container.configuration?.filament_settings?.filament_colour;
     const colors =
       Array.isArray(projectColors) && projectColors.length ? projectColors : filamentColors;
     if (Array.isArray(colors) && colors.length) palettes.push(colors);
   }
-  return { objects, instances, palettes };
+  return { objects, instances, palettes, flattenedRecipes };
 }

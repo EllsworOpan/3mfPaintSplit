@@ -15,7 +15,7 @@ const programs = {
 };
 for (const [name, executable] of Object.entries(programs))
   test(
-    `${name}: model-only cut export keeps spatial paint and extended material 18 after native save`,
+    `${name}: native save retains spatial paint bytes and supported material slots`,
     { skip: !existsSync(executable), timeout: 60000 },
     () => {
       const dir = resolve(`.tmp/slicer-compatibility/${name}`);
@@ -23,13 +23,14 @@ for (const [name, executable] of Object.entries(programs))
       const source = import3mf(paintedSquare());
       const normal = [1, 2, 0],
         offset = 37.3;
-      const pieces = splitMesh(source.pieces[0], normal, offset, 18);
-      const palette = Array.from({ length: 18 }, (_, i) => PALETTE[i % PALETTE.length]);
+      const capMaterial = name === 'orca' ? 16 : 18;
+      const pieces = splitMesh(source.pieces[0], normal, offset, capMaterial);
+      const palette = Array.from({ length: capMaterial }, (_, i) => PALETTE[i % PALETTE.length]);
       const input = resolve(dir, 'model-only.3mf'),
         output = resolve(dir, `roundtrip-${Date.now()}.3mf`);
       writeFileSync(
         input,
-        export3mf(pieces, palette, { format: name === 'prusa3' ? 'prusa3' : 'universal' }),
+        export3mf(pieces, palette, { format: name === 'bambu' ? 'universal' : name }),
       );
       const args =
         name === 'prusa3'
@@ -58,7 +59,7 @@ for (const [name, executable] of Object.entries(programs))
         assert.ok(p.health.closed);
         assert.ok(Math.abs(p.health.volume - pieces[i].health.volume) < 0.01);
         assertPaintAtOriginalPositions(p, [{ normal, offset, sign: i ? -1 : 1 }], 1e-4);
-        assert.ok(p.faces.some((f) => f.material === 18));
+        assert.ok(p.faces.some((f) => f.material === capMaterial));
       }
     },
   );

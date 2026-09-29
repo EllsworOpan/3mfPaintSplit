@@ -14,7 +14,7 @@ to exercise import; this app never includes them in exports.
   annotations on shared mesh wrappers, multiple beds, all five volume roles,
   transformed instances and a non-printing copy.
 - `multimaterial-mmu-prusa3-alpha12.3mf`: alpha12 blend and gradient materials;
-  verifies a clear rejection instead of silently changing virtual material recipes.
+  verifies conversion to flat region IDs with an explicit warning and no exported recipes or hardware.
 
 Synthetic fixtures in `slicer-formats.test.js` cover malformed metadata, shared
 resource IDs, mixed units and PrusaSlicer 3 partial-face paint independently of the

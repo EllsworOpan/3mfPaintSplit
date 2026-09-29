@@ -21,6 +21,50 @@ const open = (bytes) => import3mf(bytes, 'fixture.3mf');
 const fixture = (name) => readFileSync(new URL(`./fixtures/${name}.3mf`, import.meta.url));
 const base = () => export3mf([cubeMesh()], PALETTE);
 
+test('required extensions resolve by namespace and unknown ones reject on root or referenced models', () => {
+  for (const declaration of [
+    'xmlns:future="urn:unknown" requiredextensions="future"',
+    'requiredextensions="undeclared"',
+    'xmlns:p="urn:unknown" requiredextensions="p"',
+  ]) {
+    const root = rewrite(base(), (f) => {
+      f[modelPath] = strToU8(text(f).replace('<model ', `<model ${declaration} `));
+    });
+    assert.throws(() => open(root), /Unsupported required 3MF extension/);
+    const external = rewrite(root, (f) => {
+      f['3D/part.model'] = f[modelPath];
+      f[modelPath] = strToU8(
+        '<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" requiredextensions="p"><resources><object id="1"><components><component objectid="2" p:path="/3D/part.model"/></components></object></resources><build><item objectid="1"/></build></model>',
+      );
+    });
+    assert.throws(() => open(external), /Unsupported required 3MF extension/);
+  }
+  const material = rewrite(base(), (f) => {
+    f[modelPath] = strToU8(
+      text(f).replace(
+        '<model ',
+        '<model xmlns:colors="http://schemas.microsoft.com/3dmanufacturing/material/2015/02" requiredextensions="colors" ',
+      ),
+    );
+  });
+  assert.equal(open(material).pieces.length, 1);
+  const optional = rewrite(base(), (f) => {
+    f[modelPath] = strToU8(text(f).replace('<model ', '<model xmlns:future="urn:unknown" '));
+  });
+  assert.equal(open(optional).pieces.length, 1);
+});
+
+test('Orca export enforces the 2.4.2 paint range without limiting unused palette slots', () => {
+  const mesh = cubeMesh(),
+    colors = Array.from({ length: 32 }, () => '#FFFFFF');
+  mesh.faces[0].material = 16;
+  assert.ok(export3mf([mesh], colors, { format: 'orca' }).length);
+  mesh.faces[0].material = 17;
+  assert.throws(() => export3mf([mesh], colors, { format: 'orca' }), /OrcaSlicer 2.4.2.*1–16/);
+  assert.ok(export3mf([mesh], colors).length);
+  assert.equal(open(fixture('painted-plates-orca')).format, 'orca');
+});
+
 for (const [name, count, painted, palette] of [
   ['painted-prusa', 2, 20, ['#FF0000', '#00FF00', '#0000FF']],
   ['painted-instances-prusa', 4, 40, null],
@@ -64,6 +108,44 @@ test('exports contain only meshes, native paint, names and standard colors; no p
   assert.match(all, /slic3rpe:mmu_segmentation=/);
   assert.match(all, /paint_color=/);
   assert.match(all, /m:colorgroup/);
+});
+
+test('every export target keeps region IDs and the chosen cut-face region with identical display colors', () => {
+  const mesh = cubeMesh(),
+    palette = Array(4).fill('#808080');
+  const pieces = splitMesh(mesh, [1, 0, 0], bounds([mesh]).center[0], 4);
+  for (const format of ['universal', 'orca', 'prusa3']) {
+    const bytes = export3mf(pieces, palette, { format });
+    const round = open(bytes),
+      files = unzipSync(bytes);
+    assert.deepEqual(
+      round.pieces.map((p) => p.faces.map((f) => f.material)),
+      pieces.map((p) => p.faces.map((f) => f.material)),
+    );
+    assert.ok(round.pieces.every((p) => p.faces.some((f) => f.material === 4)));
+    assert.equal(new Set(round.palette).size, 1);
+    assert.ok(new Set(round.pieces.flatMap((p) => p.faces.map((f) => f.material))).size > 1);
+    assert.equal(files['Metadata/Slic3r_PE.config'], undefined);
+    assert.equal(files['Metadata/project_settings.config'], undefined);
+    if (format === 'prusa3')
+      assert.deepEqual(JSON.parse(text(files, projectPath)).config_containers, []);
+  }
+});
+
+test('standard 3MF property IDs stay distinct even when their RGB colors match', () => {
+  const mesh = cubeMesh(),
+    palette = Array(3).fill('#808080');
+  const bytes = rewrite(export3mf([mesh], palette), (files) => {
+    files[modelPath] = strToU8(
+      text(files).replace(/ (?:slic3rpe:mmu_segmentation|paint_color)="[^"]*"/g, ''),
+    );
+  });
+  const source = open(bytes);
+  assert.deepEqual(
+    source.pieces[0].faces.map((f) => f.material),
+    mesh.faces.map((f) => f.material),
+  );
+  assert.deepEqual(source.palette, palette);
 });
 
 test('PrusaSlicer 3 export has native paint and volume identity but no printer configuration', () => {
@@ -258,8 +340,33 @@ for (const [name, change] of [
     assert.throws(() => open(bytes), /paint/i);
   });
 
-test('PrusaSlicer 3 blend/gradient recipes reject instead of becoming unrelated physical slots', () => {
-  assert.throws(() => open(fixture('multimaterial-mmu-prusa3-alpha12')), /blend\/gradient/);
+test('PrusaSlicer 3 blend/gradient assignments become flat region IDs without hardware or recipes', () => {
+  const source = open(fixture('multimaterial-mmu-prusa3-alpha12'));
+  assert.ok(source.warnings.some((w) => w.includes('flat color regions')));
+  const regions = new Set(source.pieces.flatMap((p) => p.faces.map((f) => f.material)));
+  for (const id of [1, 2, 6, 20]) assert.ok(regions.has(id));
+  for (const format of ['universal', 'prusa3']) {
+    const bytes = export3mf(source.pieces, source.palette, { format });
+    assert.deepEqual(open(bytes).pieces, source.pieces);
+    const files = unzipSync(bytes);
+    assert.doesNotMatch(
+      Object.values(files).map(strFromU8).join('\n'),
+      /virtual_extruders|hw_config|nozzle_diameter|printer_settings|filament_settings|flush_volumes|Choose a profile/,
+    );
+  }
+});
+
+test('PrusaSlicer 3 paint does not depend on a readable optional printer configuration', () => {
+  const input = fixture('painted-plates-prusa3-alpha12');
+  const source = open(input);
+  const bytes = rewrite(input, (files) => {
+    const data = JSON.parse(text(files, projectPath));
+    data.config_containers = [
+      { configuration: 'unusable printer settings', preset: { hw_config: null } },
+    ];
+    files[projectPath] = strToU8(JSON.stringify(data));
+  });
+  assert.deepEqual(open(bytes).pieces, source.pieces);
 });
 
 test('resource paths reject external targets, traversal and ambiguous archive aliases', () => {

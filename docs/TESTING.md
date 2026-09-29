@@ -12,11 +12,11 @@ npm run test:model
 
 The optional native integration tests use `PRUSA_SLICER`, `BAMBU_STUDIO`, `ORCA_SLICER`, and `PRUSA_SLICER3`. They skip with an explicit test result when an executable is unavailable. The PrusaSlicer 3 test uses a separate profile directory under `.tmp`, and selects the native JSON paint export. The other slicers use the three-file mesh-and-paint export. Both formats deliberately omit printer profiles.
 
-Validation on September 29, 2026: **109 tests passed, zero failures and zero skips**, including native CLI saves in PrusaSlicer 2.9.6, Bambu Studio 2.8.2.61, OrcaSlicer 2.4.2 and PrusaSlicer 3.0.0-alpha12. The production build and example generation also passed. A browser check verified import, PrusaSlicer 3 format selection, and the cut workflow.
+Validation on September 29, 2026: **118 tests passed, zero failures and zero skips**, including native CLI saves in PrusaSlicer 2.9.6, Bambu Studio 2.8.2.61, OrcaSlicer 2.4.2 and PrusaSlicer 3.0.0-alpha12. Actual slicing verified tool selection for Prusa slots 16, 17 and 32 and Orca slot 16. The production build also passed. Clean-contract regressions cover flat blend/gradient region IDs, matching RGB swatches, cut-face assignments and optional printer configuration.
 
 The GitHub `Test application` workflow runs tests and production builds on Windows and Linux with Node.js 22 for pushes and pull requests. Native PrusaSlicer tests are skipped on those runners unless the slicer is separately installed. GitHub Pages publishing also runs the tests before deployment.
 
-Committed native fixtures cover PrusaSlicer 2.9.6, Bambu Studio 2.8.2.61, OrcaSlicer 2.4.2, and PrusaSlicer 3.0.0-alpha12 even on hosts without the slicers. See `tests/fixtures/README.md` for provenance. Synthetic fixtures separately exercise JSON partial-triangle paint, invalid annotations, scoped external IDs, mixed model units, automatic palette recovery, and rejection of unsupported virtual material recipes.
+Committed native fixtures cover PrusaSlicer 2.9.6, Bambu Studio 2.8.2.61, OrcaSlicer 2.4.2, and PrusaSlicer 3.0.0-alpha12 even on hosts without the slicers. See `tests/fixtures/README.md` for provenance. Synthetic fixtures separately exercise JSON partial-triangle paint, invalid annotations, scoped external IDs, mixed model units and automatic palette recovery. Blend/gradient assignments are checked as flat region IDs, with recipes and hardware discarded. Separate IDs and newly chosen cut-face IDs remain distinct even with identical display swatches.
 
 ## The requested use case
 
@@ -64,6 +64,10 @@ To reproduce the example cut in the app, set Tilt to **90°**, Azimuth to **63.4
 | `core.test.js`                 | Extended material slots in both dialects, conformity, hollows, transforms, core 3MF round trips                  |
 | `prusa.test.js`                | Native PrusaSlicer round trip with extended material indices                                                     |
 | `slicer-formats.test.js`       | Native fixtures, automatic palette recovery, JSON paint, profile-free archives, scoped parts, malformed metadata |
-| `slicer-compatibility.test.js` | Native Bambu, Orca, and PrusaSlicer 3 saves; spatial paint and material 18                                       |
+| `slicer-compatibility.test.js` | Native Bambu, Orca, and PrusaSlicer 3 saves; spatial paint and supported slots (Orca 16, others 18)              |
+| `paint-slicing.test.js`        | Actual PrusaSlicer 2 extrusion uses the expected tool for painted slots 16, 17 and 32                            |
+| `orca-paint-slicing.test.js`   | Actual OrcaSlicer 2.4.2 extrusion uses tool 15 for painted slot 16                                               |
+
+Slicing tests add printer settings only to temporary test fixtures so the vendor must interpret paint and produce G-code. Those settings are never part of application exports. The assertions inspect actual positive extrusion moves and their selected tool; a native save alone only proves persistence.
 
 The tests do not cover every possible damaged or self-intersecting mesh, virtual-material recipe, printer profile, or future slicer format. They also do not automate browser visual rendering; those are separate from the geometry and paint guarantees tested here.

@@ -146,6 +146,7 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
   }
   if (!read(root)) throw new Error('No 3D model was found in this 3MF archive.');
   const cache = new Map(),
+    colorRegions = new Map(),
     warnings = [],
     palette = [];
   const prusa3 = readPrusaPaint(read);
@@ -162,6 +163,10 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
   };
   if (prusa3) {
     warnings.push('Experimental PrusaSlicer 3 paint import (validated with 3.0.0-alpha12).');
+    if (prusa3.flattenedRecipes)
+      warnings.push(
+        'Blend and gradient assignments were kept as flat color regions. Their mixing recipes were discarded; assign materials to these region numbers in the slicer.',
+      );
     if (prusa3.palettes.length) setPalette(prusa3.palettes[0]);
     if (prusa3.palettes.some((p) => JSON.stringify(p) !== JSON.stringify(prusa3.palettes[0])))
       warnings.push(
@@ -236,6 +241,20 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
       el = doc.documentElement,
       resources = child(el, 'resources');
     if (el.localName !== 'model' || !resources) throw new Error('Invalid 3MF model resources.');
+    // Resolve prefixes, not their spelling: p/m are conventions, not identities.
+    const supportedExtensions = new Set([
+      'http://schemas.microsoft.com/3dmanufacturing/production/2015/06',
+      'http://schemas.microsoft.com/3dmanufacturing/material/2015/02',
+    ]);
+    for (const prefix of (el.getAttribute('requiredextensions') || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)) {
+      if (!supportedExtensions.has(el.lookupNamespaceURI(prefix)))
+        throw new Error(
+          `Unsupported required 3MF extension: ${prefix}. Export a mesh-and-paint 3MF without this extension in the source app.`,
+        );
+    }
     const ids = new Set();
     for (const resource of Array.from(resources.childNodes).filter((e) => e.nodeType === 1)) {
       const id = resource.getAttribute('id');
@@ -454,18 +473,33 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
                 resource,
                 resource.localName === 'basematerials' ? 'base' : 'color',
               ),
-              entry = entries[Number(p1)];
-            const color =
-              entry && (entry.getAttribute('color') || entry.getAttribute('displaycolor'));
-            if (color && /^#[\da-f]{6}/i.test(color)) {
-              const normalized = color.slice(0, 7).toUpperCase();
-              let index = palette.findIndex((c) => c.toUpperCase() === normalized);
-              if (index < 0) {
-                index = palette.length;
-                palette.push(normalized);
-              }
-              material = index + 1;
+              property = Number(p1);
+            if (!Number.isInteger(property) || property < 0 || property >= entries.length)
+              throw new Error('A triangle references a missing color region.');
+            // Property IDs define regions. Equal RGB swatches must not merge
+            // independently assignable labels (including separately scoped resources).
+            const resourceKey = `${path}#${pid}`;
+            if (!colorRegions.has(resourceKey)) {
+              const colors = entries.map((entry, index) => {
+                const c = entry.getAttribute('color') || entry.getAttribute('displaycolor') || '';
+                return /^#[\da-f]{6}/i.test(c)
+                  ? c.slice(0, 7)
+                  : DEFAULT_COLORS[index % DEFAULT_COLORS.length];
+              });
+              const reusePalette =
+                !colorRegions.size &&
+                colors.length === palette.length &&
+                colors.every((c, i) => c.toUpperCase() === palette[i].toUpperCase());
+              const start = reusePalette ? 0 : palette.length;
+              if (start + colors.length > 255)
+                throw new Error('This model exceeds the 255 color-region limit.');
+              if (!reusePalette) palette.push(...colors);
+              colorRegions.set(
+                resourceKey,
+                colors.map((_, i) => start + i + 1),
+              );
             }
+            material = colorRegions.get(resourceKey)[property];
           }
         }
         if (prusa || bambu) paintedTriangles++;
@@ -556,13 +590,22 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
     filename,
     sourceTriangles,
     paintedTriangles,
-    format: prusa3 ? 'prusa3' : 'universal',
+    format: prusa3
+      ? 'prusa3'
+      : children(rootData.el, 'metadata').some(
+            (m) =>
+              m.getAttribute('name') === 'OrcaSlicer' ||
+              (m.getAttribute('name') === 'Application' && /^OrcaSlicer-/i.test(m.textContent)),
+          )
+        ? 'orca'
+        : 'universal',
   };
 }
 
 export function export3mf(pieces, palette, options = {}) {
   const format = options.format || 'universal';
-  if (!['universal', 'prusa3'].includes(format)) throw new Error('Unknown 3MF export format.');
+  if (!['universal', 'orca', 'prusa3'].includes(format))
+    throw new Error('Unknown 3MF export format.');
   const prusa3 = format === 'prusa3';
   if (!pieces.length) throw new Error('Select at least one piece to export.');
   if (
@@ -585,6 +628,10 @@ export function export3mf(pieces, palette, options = {}) {
   const paintVersion = pieces.some((piece) => piece.faces.some((face) => face.material > 16))
     ? 2
     : 1;
+  if (format === 'orca' && paintVersion > 1)
+    throw new Error(
+      'OrcaSlicer 2.4.2 supports painted material slots 1–16. Reassign higher slots before exporting, or choose PrusaSlicer / Bambu Studio.',
+    );
   const meshId = (i) => 2 + i * (prusa3 ? 3 : 1);
   const objectId = (i) => meshId(i) + (prusa3 ? 2 : 0);
   const objects = pieces
