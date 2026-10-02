@@ -1,6 +1,6 @@
 # 3MF Paint Split
 
-A standalone, local-first web app for cutting already painted 3MF models into printable pieces while keeping their PrusaSlicer MMU / Bambu AMS material assignments. This is a new application, not a Texture2Paint fork.
+A standalone, local-first web app for cutting already painted 3MF models into printable pieces while keeping their PrusaSlicer MMU / Bambu AMS material assignments, and converting color regions to virtual extruders with or without cutting. This is a new application, not a Texture2Paint fork.
 
 ## Run with Docker
 
@@ -26,15 +26,25 @@ Open **http://localhost:5174**. `npm run build` creates the static site in `dist
 ## Use the app
 
 1. Open or drop a painted `.3mf` file. Import always reads meshes, paint, material assignments and part roles, ignores unrelated slicer data, and automatically recovers an unreadable optional palette with a warning. It never skips invalid geometry, paint or volume metadata. The demo provides a quick way to try the workflow.
-2. Select the piece to cut. Choose X, Y, or Z for a centered plane, or set the position, tilt, and azimuth. The offset is measured from that piece's bounding-box center, along the plane normal. Move and Rotate handles also position the plane directly in the viewer.
+2. Cutting is optional: to convert colors only, skip directly to export and enable **Use virtual extruders**. To cut, select a piece. Choose X, Y, or Z for a centered plane, or set the position, tilt, and azimuth. The offset is measured from that piece's bounding-box center, along the plane normal. Move and Rotate handles also position the plane directly in the viewer.
 3. Choose the material for the new interior faces and apply the cut. Both halves remain, with no kerf or gap introduced into their geometry.
 4. Select a resulting piece and cut again if needed. The last 12 cuts can be undone. Preview spacing helps inspect the halves and never changes their exported positions. Moving the plane returns to the assembled preview.
-5. Choose the target slicer and export all pieces or just the selected piece. Use **PrusaSlicer 2 · Bambu Studio**, **OrcaSlicer 2.4.2 (paint slots 1–16)**, or **PrusaSlicer 3 (experimental)**. Native Orca and PrusaSlicer 3 inputs select their target automatically. Orca export rejects painted slots above 16; a longer palette is allowed if those slots are unused. Each piece is a separate 3MF object.
-6. Open/import the output into your existing slicer setup. Keep the original material slot order, orient the pieces, and slice. Exports contain **only mesh and paint data**, with no printer, filament or print profiles, invented nozzle dimensions, G-code, or purge settings. Display colors travel in a standard 3MF color group; slicers may use their current filament colors, so match the numbered slots there.
+5. Choose the target slicer and export all pieces or just the selected piece. Ordinary paint uses **PrusaSlicer 2 / Bambu Studio**, **OrcaSlicer 2.4.2 (paint slots 1–16)**, or **PrusaSlicer 3 (experimental)**. Native Orca and PrusaSlicer 3 inputs select their target automatically. Orca export rejects painted slots above 16; a longer palette is allowed if those slots are unused. Each piece is a separate 3MF object. Virtual mode selects its supported PrusaSlicer target automatically; disabling it restores your previous ordinary-paint target.
+6. Open/import ordinary paint output into your existing slicer setup. Keep the original material slot order, orient the pieces, and slice. For virtual output, follow the Open Project instructions below. Exports contain mesh, paint, and optionally newly generated virtual-extruder recipes, with no printer, filament or print profiles, invented nozzle dimensions, G-code, or purge settings. Display colors travel in a standard 3MF color group; ordinary paint slots should match your current filament slots.
 
 All parsing, geometry processing, and export run on your device. No file upload service, account, CDN, or network API is required. Dependencies are bundled into the static app. Color swatches edit the displayed/exported filament colors; they do not repaint surfaces or change material numbers.
 
-Every format follows the same clean contract: retain source meshes and numbered color regions, apply the cuts and your selected cut-face region, then export those results. Inherited slicer settings never enter the output. Standard RGB swatches are a display convenience; the receiving slicer supplies printer profiles, materials and tool assignments. Separate region numbers stay separate even when their swatches match.
+Every format follows the same clean contract: resolve source paint into geometry and numbered color regions, apply any cuts and your selected cut-face region, then export those results. Inherited slicer settings never enter the output. Standard RGB swatches describe region colors; the receiving slicer supplies printer profiles and materials. Separate region numbers stay separate even when their swatches match.
+
+## Virtual extruders without cutting
+
+Open a painted 3MF and enable **Use virtual extruders** in the export panel. Choose **2–8 physical filament slots** (default 8), then click the numbered filament swatches to match your loaded filaments in tool order. The starting reference colors are Cyan, Magenta, Yellow, White, Black, Red, Green, Blue, truncated to your slot count. These are reference RGB values, not measured filament colors. Your edits remain when you reduce the slot count or switch back to ordinary paint.
+
+Click **Save virtual-extruder 3MF** immediately, or make cuts first. Every color region used by the exported pieces, including cut-face colors, gets a distinct virtual extruder with an automatic starting recipe using up to three physical tools. Regions with identical RGB colors or recipes remain independently editable. Unused palette slots are omitted. Geometry and paint boundaries are retained; the conversion does not cut the model. Import still resolves partial-triangle paint into mesh triangles as usual.
+
+Only **PrusaSlicer 2.9.6 or later** currently supports virtual export through the bundled API. Select a printer with the matching physical slot count, then use **File → Open Project** to retain virtual extruders; importing geometry alone discards them. Recipes are estimates you can edit in the slicer. The viewer and color-region swatches show desired colors, not the predicted appearance of printed mixtures. Changing a display swatch in the slicer does not automatically recalculate its recipe.
+
+The app regenerates recipes from region colors and your chosen physical filaments; it does not copy original mixing recipes or printer settings. Virtual IDs follow the physical slots and are assigned deterministically by source region number. The format permits at most `255 − physical slot count` used virtual regions; exceeding that limit stops export with an error instead of dropping colors.
 
 ## Paint preservation
 
@@ -75,7 +85,7 @@ npm run build
 npm run format
 ```
 
-The test suite covers both paint dialects, PrusaSlicer 3 JSON paint, native fixtures from all supported slicers, automatic palette recovery, profile-free export contents, every split-side arrangement, extended material indices, recursive subdivisions, exact spatial paint preservation, topology, volume conservation, oblique/repeated cuts, hollow caps, transforms, component references, malformed data, worker operations, undo, and 3MF round trips. Windows and Linux tests/builds run on pushes and pull requests.
+The test suite covers both paint dialects, PrusaSlicer 3 JSON paint, native fixtures from all supported slicers, automatic palette recovery, profile-free export contents, every split-side arrangement, extended material indices, recursive subdivisions, exact spatial paint preservation, topology, volume conservation, oblique/repeated cuts, hollow caps, transforms, component references, malformed data, worker operations, undo, and 3MF round trips. Virtual-export tests cover conversion without cuts, partial-triangle paint and cut-face preservation, selected-piece export, custom physical filaments, independent equal-color regions, material limits, unsupported targets, and unchanged ordinary exports. Windows and Linux tests/builds run on pushes and pull requests.
 
 Optional native integration tests use `PRUSA_SLICER`, `BAMBU_STUDIO`, `ORCA_SLICER`, and `PRUSA_SLICER3`, or the installed paths documented in the tests. Native saves check paint persistence and spatial position. Separate slicing tests verify that PrusaSlicer 2 uses the correct extrusion tool for painted slots 16, 17 and 32, and OrcaSlicer 2.4.2 for slot 16. Saving opaque paint bytes alone does not establish that a slicer interprets them correctly. Tests skip explicitly when a slicer is unavailable.
 
@@ -85,14 +95,14 @@ Tests use generated fixtures. Validate the first export of your own miniature in
 
 ## Project structure
 
-| File                 | Responsibility                                        |
-| -------------------- | ----------------------------------------------------- |
-| `src/paint.js`       | Shared paint API compatibility export               |
-| `src/geometry.js`    | Conforming edges, plane clipping, caps and validation |
-| `src/three-mf.js`    | App mesh adapter for 3MF import/export     |
-| `src/worker.js`      | Processing, cut history and export off the UI thread  |
-| `src/viewer.js`      | Three.js viewer, orbit controls and plane gizmo       |
-| `src/main.js`        | User interface and workflow                           |
+| File              | Responsibility                                        |
+| ----------------- | ----------------------------------------------------- |
+| `src/paint.js`    | Shared paint API compatibility export                 |
+| `src/geometry.js` | Conforming edges, plane clipping, caps and validation |
+| `src/three-mf.js` | App mesh adapter for 3MF import/export                |
+| `src/worker.js`   | Processing, cut history and export off the UI thread  |
+| `src/viewer.js`   | Three.js viewer, orbit controls and plane gizmo       |
+| `src/main.js`     | User interface and workflow                           |
 
 Three.js, fflate, earcut, and xmldom retain their respective upstream licenses. Native test models from WebRollingBrim3mf are attributed in `tests/fixtures/README.md` with their MIT license. No Texture2Paint source files are included.
 

@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#141a22" />
     <meta
       name="description"
-      content="View and cut painted 3MF models while preserving PrusaSlicer MMU and Bambu AMS material assignments. All processing stays in your browser."
+      content="Cut painted 3MF models and convert color regions to virtual extruders, with or without cutting. All processing stays in your browser."
     />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <title>3MF Paint Split</title>
@@ -39,7 +39,8 @@
           <div class="drop-icon">↥</div>
           <h2>Split the model.<br />Keep the paint.</h2>
           <p>
-            Open a painted 3MF, position your cut,<br />and take the pieces back to your slicer.
+            Open a painted 3MF to cut it or convert its colors<br />to virtual extruders, then
+            return to your slicer.
           </p>
           <button id="empty-open" class="primary">Open painted 3MF</button
           ><button id="demo-button" class="text-button">Try a painted demo <span>→</span></button
@@ -163,12 +164,64 @@
         </section>
         <section class="panel materials-panel">
           <div class="section-title">
-            <h2>Materials</h2>
+            <h2>Color regions</h2>
             <span id="material-count" class="muted">—</span>
           </div>
           <div id="palette" class="palette"><span class="muted">Colors from your 3MF</span></div>
         </section>
         <section class="export-panel">
+          <label class="export-toggle" for="virtual-extruders">
+            <input
+              id="virtual-extruders"
+              type="checkbox"
+              aria-controls="virtual-settings"
+              aria-describedby="virtual-summary"
+              disabled
+            />
+            Use virtual extruders
+          </label>
+          <p id="virtual-summary" class="virtual-note">
+            Convert every exported color region. No cut required.
+          </p>
+          <div id="virtual-settings" hidden>
+            <div class="physical-slot-heading">
+              <label for="physical-extruders">Physical filament slots</label>
+              <select id="physical-extruders" aria-describedby="virtual-note" disabled>
+                <option value="2">2 slots</option>
+                <option value="3">3 slots</option>
+                <option value="4">4 slots</option>
+                <option value="5">5 slots</option>
+                <option value="6">6 slots</option>
+                <option value="7">7 slots</option>
+                <option value="8" selected>8 slots</option>
+              </select>
+              <span id="physical-slot-help" class="help-tip">
+                <button
+                  id="physical-slot-help-button"
+                  type="button"
+                  class="help-tip-button"
+                  aria-label="About physical filament slots"
+                  aria-describedby="virtual-note"
+                  aria-expanded="false"
+                >
+                  i
+                </button>
+                <span id="virtual-note" class="help-tooltip" role="tooltip" hidden>
+                  Match the numbered colors to your loaded filaments in slot order. Click a swatch
+                  to edit it. Reference colors start as Cyan, Magenta, Yellow, White, Black, Red,
+                  Green, Blue. Automatic mixing recipes are estimates you can edit in the slicer;
+                  the preview shows desired colors. Select a printer with the same physical slot
+                  count before opening the exported project.
+                </span>
+              </span>
+            </div>
+            <div
+              id="physical-colors"
+              class="palette"
+              role="group"
+              aria-label="Physical filament colors in slot order"
+            ></div>
+          </div>
           <div class="field">
             <label for="export-format">Target slicer</label>
             <select id="export-format" disabled></select>
@@ -181,9 +234,9 @@
             </select>
           </div>
           <button id="export-button" class="export-button" disabled>
-            ↓ <span>Save painted 3MF</span><span id="export-count">0</span>
+            ↓ <span id="export-label">Save painted 3MF</span><span id="export-count">0</span>
           </button>
-          <p>Meshes and paint only. Uses your slicer’s current printer.</p>
+          <p id="export-note">Meshes and paint only. Uses your slicer’s current printer.</p>
         </section>
       </aside>
     </main>
@@ -203,8 +256,8 @@
           recovery warning appears. Invalid geometry, paint, or part roles still stop the import.
         </li>
         <li>
-          <strong>Position the plane.</strong> Choose X, Y, or Z, change the offset, or tilt and
-          rotate the plane. Drag the arrow to move it; switch to Rotate for angle handles.
+          <strong>Optionally position the plane.</strong> Choose X, Y, or Z, change the offset, or
+          tilt and rotate the plane. Drag the arrow to move it; switch to Rotate for angle handles.
         </li>
         <li>
           <strong>Apply your cut.</strong> Both pieces remain. Select any piece and cut it again.
@@ -215,6 +268,14 @@
           objects, keep the same material slot order in your current printer setup, then orient each
           piece for printing. Exports contain no printer or print configuration. PrusaSlicer 3 uses
           a separate paint format; select its experimental export when using version 3.
+        </li>
+        <li>
+          <strong>Convert colors to virtual extruders.</strong> Enable Use virtual extruders, choose
+          2–8 physical filament slots, and edit their numbered swatches to match your printer. Every
+          exported color region gets its own editable virtual extruder and an estimated mixing
+          recipe, even when two regions share a color. You can export immediately without making a
+          cut. Select the matching printer in PrusaSlicer 2.9.6 or later and use File → Open Project
+          to keep the virtual extruders. No printer or filament profiles are included.
         </li>
       </ol>
       <p>

@@ -60,6 +60,11 @@ export function import3mf(buffer, filename = 'Model.3mf', progress = () => {}) {
 // Compatibility names are interpreted by the shared target registry.
 import { preferredPaintTarget } from './vendor/three-mf/index.js';
 export function export3mf(pieces, palette, options = {}) {
+  return export3mfResult(pieces, palette, options).bytes;
+}
+
+// Keep export notices available to the UI without changing the byte-only adapter.
+export function export3mfResult(pieces, palette, options = {}) {
   if (!pieces.length) throw new Error('Select at least one piece to export.');
   if (
     !Array.isArray(palette) ||
@@ -84,6 +89,8 @@ export function export3mf(pieces, palette, options = {}) {
     printable: true,
     transform: identity(),
     overrides: {},
+    // An explicitly painted piece needs no unused virtual default region.
+    ...(options.virtualExtruders !== undefined ? { defaultRegion: piece.faces[0].material } : {}),
     parts: [
       {
         id: `piece-${i}/part`,
@@ -98,6 +105,9 @@ export function export3mf(pieces, palette, options = {}) {
   }));
   return writeDocument(createDocument(objects, palette), {
     mode: 'create',
-    target: getTarget(options.format || 'universal').id,
-  }).bytes;
+    target: getTarget(
+      options.format || (options.virtualExtruders !== undefined ? 'prusa' : 'universal'),
+    ).id,
+    virtualExtruders: options.virtualExtruders,
+  });
 }

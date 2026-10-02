@@ -1,10 +1,9 @@
 import './style.css';
 import { Viewer } from './viewer.js';
 import { bounds, dot } from './geometry.js';
-import { paintTargets } from './vendor/three-mf/index.js';
+import { paintTargets, VIRTUAL_EXTRUDER_PALETTE } from './vendor/three-mf/index.js';
 
 const $ = (id) => document.getElementById(id);
-$('export-format').replaceChildren(...paintTargets().map((t) => new Option(t.name, t.id)));
 let project = null,
   selectedId = null,
   busy = false,
@@ -14,6 +13,76 @@ let project = null,
   planeNormal = [0, 0, 1],
   planeOffset = 0,
   offsetRange = [-25, 25];
+let physicalPaintTarget = paintTargets()[0].id;
+const physicalFilamentColors = VIRTUAL_EXTRUDER_PALETTE.map((swatch) => swatch.color);
+function renderPhysicalFilamentColors() {
+  const count = Number($('physical-extruders').value);
+  $('physical-colors').replaceChildren(
+    ...physicalFilamentColors.slice(0, count).map((color, index) => {
+      const label = document.createElement('label');
+      label.className = 'swatch';
+      const input = document.createElement('input');
+      input.type = 'color';
+      input.value = color;
+      input.disabled = busy || !project || !$('virtual-extruders').checked;
+      input.setAttribute('aria-label', `Physical filament color for slot ${index + 1}`);
+      input.title = `Slot ${index + 1}: ${color.toUpperCase()} · Click to edit`;
+      input.oninput = () => {
+        physicalFilamentColors[index] = input.value.toUpperCase();
+        input.title = `Slot ${index + 1}: ${physicalFilamentColors[index]} · Click to edit`;
+      };
+      label.append(input, document.createTextNode(String(index + 1)));
+      return label;
+    }),
+  );
+}
+function syncVirtualExtruderUI() {
+  const enabled = $('virtual-extruders').checked;
+  const targets = paintTargets({ virtualExtruders: enabled });
+  const preferred = enabled ? $('export-format').value : physicalPaintTarget;
+  $('export-format').replaceChildren(
+    ...targets.map((target) => new Option(target.name, target.id)),
+  );
+  $('export-format').value = targets.some((target) => target.id === preferred)
+    ? preferred
+    : targets[0].id;
+  $('virtual-settings').hidden = !enabled;
+  $('export-label').textContent = enabled ? 'Save virtual-extruder 3MF' : 'Save painted 3MF';
+  $('export-note').textContent = enabled
+    ? 'Select the matching printer, then use File → Open Project in PrusaSlicer 2.9.6+.'
+    : 'Meshes and paint only. Uses your slicer’s current printer.';
+  renderPhysicalFilamentColors();
+  syncPhysicalControls();
+}
+function syncPhysicalControls() {
+  $('virtual-settings')
+    .querySelectorAll('input,select')
+    .forEach((el) => {
+      el.disabled = busy || !project || !$('virtual-extruders').checked;
+    });
+}
+$('virtual-extruders').onchange = syncVirtualExtruderUI;
+$('physical-extruders').onchange = renderPhysicalFilamentColors;
+$('export-format').onchange = () => {
+  if (!$('virtual-extruders').checked) physicalPaintTarget = $('export-format').value;
+};
+function showPhysicalSlotHelp(open) {
+  $('virtual-note').hidden = !open;
+  $('physical-slot-help-button').setAttribute('aria-expanded', open);
+}
+for (const event of ['mouseenter', 'focus', 'click'])
+  $('physical-slot-help-button').addEventListener(event, () => showPhysicalSlotHelp(true));
+$('physical-slot-help').onmouseleave = () => {
+  if (document.activeElement !== $('physical-slot-help-button')) showPhysicalSlotHelp(false);
+};
+$('physical-slot-help-button').onblur = () => showPhysicalSlotHelp(false);
+document.addEventListener('click', (e) => {
+  if (!$('physical-slot-help').contains(e.target)) showPhysicalSlotHelp(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') showPhysicalSlotHelp(false);
+});
+syncVirtualExtruderUI();
 function startWorker() {
   worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data }) => {
@@ -78,6 +147,7 @@ function setBusy(value, message = 'Working…') {
   $('open-button').disabled = value;
   $('empty-open').disabled = value;
   $('demo-button').disabled = value;
+  syncPhysicalControls();
 }
 async function run(message, fn) {
   if (busy) return;
@@ -177,7 +247,10 @@ function renderPieces() {
   }
 }
 function renderProject(next, fit = true) {
-  if (fit) $('export-format').value = next.format || 'universal';
+  if (fit) {
+    physicalPaintTarget = next.format || 'universal';
+    syncVirtualExtruderUI();
+  }
   const oldPalette = project?.palette;
   project = next;
   if (!fit && oldPalette) project.palette = oldPalette;
@@ -240,7 +313,7 @@ function openFile(file) {
     toast(
       next.warnings.length
         ? next.warnings.join(' ')
-        : 'Model loaded. Position the plane to make your first cut.',
+        : 'Model loaded. Make a cut, or enable virtual extruders and export directly.',
       next.warnings.length > 0,
     );
   });
@@ -253,7 +326,7 @@ $('file-input').onchange = (e) => {
 $('demo-button').onclick = () =>
   run('Loading painted demo…', async () => {
     renderProject(await request('demo'));
-    toast('Demo loaded. Try a cut, separate the preview, and export the pieces.');
+    toast('Demo loaded. Try a cut, or enable virtual extruders and export without cutting.');
   });
 $('piece-select').onchange = (e) => selectPiece(Number(e.target.value));
 document.querySelectorAll('[data-axis]').forEach(
@@ -333,26 +406,41 @@ $('undo').onclick = () => {
 };
 $('export-scope').onchange = renderPieces;
 $('export-button').onclick = () =>
-  run('Saving geometry and native paint assignments…', async () => {
+  run('Saving geometry and color assignments…', async () => {
+    const virtual = $('virtual-extruders').checked;
+    const physicalExtruderCount = Number($('physical-extruders').value);
     const ids =
         $('export-scope').value === 'selected' ? [selectedId] : project.pieces.map((p) => p.id),
-      bytes = await request('export', {
+      exported = await request('export', {
         ids,
         palette: project.palette,
-        options: { format: $('export-format').value },
+        includeDetails: true,
+        options: {
+          format: $('export-format').value,
+          virtualExtruders: virtual
+            ? {
+                physicalExtruderCount,
+                physicalColors: physicalFilamentColors.slice(0, physicalExtruderCount),
+              }
+            : undefined,
+        },
       });
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'model/3mf' })),
+    const url = URL.createObjectURL(new Blob([exported.bytes], { type: 'model/3mf' })),
       link = document.createElement('a');
     link.href = url;
     link.download =
-      project.filename.replace(/\.3mf$/i, '') + (ids.length === 1 ? '-piece' : '-split') + '.3mf';
+      project.filename.replace(/\.3mf$/i, '') +
+      (virtual ? '-virtual-extruders' : ids.length === 1 ? '-piece' : '-split') +
+      '.3mf';
     link.hidden = true;
     document.body.appendChild(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
     toast(
-      'Mesh-and-paint 3MF prepared. Use your slicer’s current printer and keep material slots in the same order.',
+      exported.warnings.length
+        ? exported.warnings.join(' ')
+        : 'Mesh-and-paint 3MF prepared. Use your slicer’s current printer and keep material slots in the same order.',
     );
   });
 $('cancel').onclick = () => {

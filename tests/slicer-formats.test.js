@@ -340,9 +340,12 @@ for (const [name, change] of [
     assert.throws(() => open(bytes), /paint/i);
   });
 
-test('PrusaSlicer 3 blend/gradient assignments become flat region IDs without hardware or recipes', () => {
+test('PrusaSlicer 3 reads virtual swatches and ordinary export retains region IDs without recipes', () => {
   const source = open(fixture('multimaterial-mmu-prusa3-alpha12'));
-  assert.ok(source.warnings.some((w) => w.includes('flat color regions')));
+  assert.ok(source.warnings.some((w) => w.includes('Virtual extruders were retained')));
+  assert.equal(source.palette[5], '#db5550');
+  assert.equal(source.palette[19], '#FF8000');
+  assert.ok(source.warnings.some((w) => w.includes('first color stop')));
   const regions = new Set(source.pieces.flatMap((p) => p.faces.map((f) => f.material)));
   for (const id of [1, 2, 6, 20]) assert.ok(regions.has(id));
   for (const format of ['universal', 'prusa3']) {

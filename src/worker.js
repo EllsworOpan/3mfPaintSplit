@@ -1,4 +1,4 @@
-import { import3mf, export3mf } from './three-mf.js';
+import { import3mf, export3mfResult } from './three-mf.js';
 import { splitMesh } from './geometry.js';
 import { demoProject } from './demo.js';
 
@@ -47,8 +47,10 @@ onmessage = ({ data }) => {
       result = snapshot();
     } else if (action === 'export') {
       const selected = pieces.filter((p) => data.ids.includes(p.id));
-      const bytes = export3mf(selected, data.palette, data.options);
-      postMessage({ id, result: bytes }, [bytes.buffer]);
+      const exported = export3mfResult(selected, data.palette, data.options);
+      postMessage({ id, result: data.includeDetails ? exported : exported.bytes }, [
+        exported.bytes.buffer,
+      ]);
       return;
     } else throw new Error('Unknown operation.');
     postMessage({ id, result });

@@ -35,6 +35,16 @@ PrusaSlicer 3 output adds its native JSON sidecars: `PrusaSlicer3_project.json` 
 
 No old model configuration or print job is copied wholesale: doing so would leave volume ranges, triangle references, supports, and other geometry-dependent metadata stale after clipping.
 
+## Optional virtual-extruder export
+
+The bundled shared API's create writer accepts `virtualExtruders: { physicalExtruderCount, physicalColors }`. The app exposes a toggle, 2–8 physical slots, and numbered editable filament colors, following Texture2Paint's UI pattern. It filters the target menu with `paintTargets({ virtualExtruders: true })`, currently selecting only the dedicated `prusa` target. Ordinary exports keep their existing targets and data contract.
+
+Each used source region gets its own ColorMix virtual ID above the physical tools, including pure colors and equal-color regions. Piece defaults use an existing face region so no unused default or palette slot needs a virtual extruder. Paint assignments are remapped without further geometry changes. Cuts are optional; cut caps participate as ordinary color regions when present. The app uses the shared API's automatic starting recipes and retains its export notices, including the requirement to open the result as a project in PrusaSlicer 2.9.6 or later.
+
+Virtual output adds newly authored `Metadata/Prusa_Slicer_full_spectrum.json`, containing physical slot colors and virtual recipes, and native object/volume material defaults in `Metadata/Slic3r_PE_model.config`. The model declares the ColorMix project format. No printer, filament, or print profiles are copied or synthesized. Recipes estimate mixtures of up to three physical tools; the exported virtual swatch shows the predicted mix color, while the source region color remains available in the returned plan. The native format allows 255 total material IDs, so the virtual-region limit is `255 − physicalExtruderCount`.
+
+See [PrusaSlicer 2.9.6 ColorMix](https://github.com/prusa3d/PrusaSlicer/releases/tag/version_2.9.6) and its [FullSpectrum serializer](https://github.com/prusa3d/PrusaSlicer/blob/version_2.9.6/src/libslic3r/Feature/FullSpectrum/VirtualExtruder.cpp) for native format evidence.
+
 ## Import and automatic recovery
 
 Each loaded model part resolves `requiredextensions` prefixes to namespace URIs and rejects unknown or undeclared required extensions, including in external component files. This follows [3MF Core 1.3 §3.4](https://github.com/3MFConsortium/spec_core/blob/1.3.0/3MF%20Core%20Specification.md#34-model). Unknown optional extensions can be ignored; an unsupported required extension may change the meaning of the geometry.

@@ -580,6 +580,75 @@ canvas {
   font-size: 12px;
   padding: 5px 8px;
 }
+.export-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: #c7d0d7;
+}
+.export-panel .virtual-note {
+  text-align: left;
+  line-height: 1.5;
+  margin: 8px 0 16px;
+}
+.physical-slot-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #b0bdc9;
+}
+.physical-slot-heading > label {
+  flex: 1;
+}
+#physical-colors {
+  gap: 3px;
+  margin-bottom: 16px;
+  justify-content: space-between;
+}
+#physical-colors .swatch {
+  gap: 2px;
+}
+#physical-colors input {
+  width: 22px;
+  height: 22px;
+}
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.help-tip-button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 11px;
+  color: var(--muted);
+}
+.help-tooltip {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  width: min(270px, calc(100vw - 48px));
+  padding: 12px;
+  border: 1px solid #526578;
+  border-radius: 7px;
+  background: #24313f;
+  color: #dce7ed;
+  box-shadow: 0 5px 20px #0005;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.help-tooltip::after {
+  content: '';
+  position: absolute;
+  inset: 100% 0 auto;
+  height: 8px;
+}
 .export-button {
   width: 100%;
   display: flex;

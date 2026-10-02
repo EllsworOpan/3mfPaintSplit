@@ -9,7 +9,7 @@ export const canSlicePrusa = existsSync(prusaExecutable);
 
 // Force the vendor to interpret paint. The oracle is extruding G-code, not our
 // own paint decoder or an opaque native save. Settings exist only in this test.
-export function assertPrusaUsesPaint(bytes, slot) {
+export function assertPrusaUsesPaint(bytes, slot, physicalExtruderCount = slot) {
   const root = resolve('.tmp/paint-slicing');
   mkdirSync(root, { recursive: true });
   const dir = mkdtempSync(resolve(root, 'run-'));
@@ -17,7 +17,7 @@ export function assertPrusaUsesPaint(bytes, slot) {
     output = resolve(dir, 'paint.gcode'),
     config = resolve(dir, 'test.ini');
   writeFileSync(input, bytes);
-  const vector = (value) => Array(slot).fill(value).join(',');
+  const vector = (value) => Array(physicalExtruderCount).fill(value).join(',');
   writeFileSync(
     config,
     [

@@ -32,6 +32,53 @@ function session(t) {
 }
 const load = (rpc) => rpc('import', { buffer: paintedSquare(), filename: 'complex.3mf' });
 
+test('worker converts without cuts, reports notices, and keeps physical exports and undo usable', async (t) => {
+  const rpc = session(t),
+    source = await load(rpc);
+  const options = {
+    format: 'prusa',
+    virtualExtruders: { physicalExtruderCount: 2, physicalColors: ['#FF0000', '#0000FF'] },
+  };
+  const result = await rpc('export', {
+    ids: source.pieces.map((p) => p.id),
+    palette: source.palette,
+    options,
+    includeDetails: true,
+  });
+  assert.ok(result.bytes instanceof Uint8Array);
+  assert.ok(result.virtualExtruders.regions.length > 0);
+  assert.match(result.warnings.join(' '), /Open Project/);
+  const physical = import3mf(
+    await rpc('export', { ids: source.pieces.map((p) => p.id), palette: source.palette }),
+  );
+  assert.deepEqual(
+    physical.pieces,
+    source.pieces.map(({ id, ...piece }) => piece),
+  );
+  const cut = await rpc('cut', {
+    pieceId: source.pieces[0].id,
+    normal: [1, 0, 0],
+    offset: 13.375,
+    capMaterial: 5,
+  });
+  const selected = await rpc('export', {
+    ids: [cut.pieces[1].id],
+    palette: source.palette,
+    options,
+    includeDetails: true,
+  });
+  assert.equal(import3mf(selected.bytes).pieces.length, 1);
+  await assert.rejects(
+    rpc('export', {
+      ids: [cut.pieces[1].id],
+      palette: source.palette,
+      options: { ...options, format: 'orca' },
+    }),
+    /not supported/,
+  );
+  assert.deepEqual((await rpc('undo')).pieces, source.pieces);
+});
+
 test('worker automatically recovers unreadable palettes and retains paint through export', async (t) => {
   const rpc = session(t),
     source = await load(rpc);
