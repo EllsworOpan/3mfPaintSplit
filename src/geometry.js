@@ -42,10 +42,9 @@ export function makeMesh(triangles, name = 'Piece') {
       }
       return map.get(k);
     });
-    if (
-      new Set(v).size === 3 &&
-      length(cross(sub(t.v[1], t.v[0]), sub(t.v[2], t.v[0]))) > EPS * EPS
-    )
+    // A very thin, nonzero-area triangle still carries boundary edges. Dropping
+    // it can open a valid detailed mesh, especially when reimporting cut caps.
+    if (new Set(v).size === 3 && length(cross(sub(t.v[1], t.v[0]), sub(t.v[2], t.v[0]))) > 0)
       faces.push({ v, material: t.material, cap: !!t.cap });
     if (faces.length > MAX_FACES)
       throw new Error('This model exceeds the 1.5 million resolved triangle limit.');
@@ -142,18 +141,23 @@ function capMesh(mesh, n, offset, outward, material) {
       e.count++;
       edges.set(key, e);
     }
-  const links = new Map();
-  for (const e of edges.values())
-    if (e.count === 1)
-      for (const [a, b] of [
-        [e.a, e.b],
-        [e.b, e.a],
-      ]) {
-        if (!links.has(a)) links.set(a, []);
-        links.get(a).push(b);
-      }
-  for (const adj of links.values())
-    if (adj.length !== 2)
+  const links = new Map(),
+    nextVertex = new Map();
+  for (const e of edges.values()) {
+    if (e.count !== 1) continue;
+    if (nextVertex.has(e.a))
+      throw new Error('The cut boundary has inconsistent winding. Repair the source model.');
+    nextVertex.set(e.a, e.b);
+    for (const [a, b] of [
+      [e.a, e.b],
+      [e.b, e.a],
+    ]) {
+      if (!links.has(a)) links.set(a, []);
+      links.get(a).push(b);
+    }
+  }
+  for (const [vertex, adj] of links)
+    if (adj.length !== 2 || !nextVertex.has(vertex))
       throw new Error(
         'The cut touches an ambiguous edge or an open surface. Move the plane slightly, or repair the source model.',
       );
@@ -164,40 +168,52 @@ function capMesh(mesh, n, offset, outward, material) {
   for (const start of links.keys()) {
     if (seen.has(start)) continue;
     const ids = [];
-    let cur = start,
-      prev = -1;
+    let cur = start;
     do {
       if (seen.has(cur))
         throw new Error('The cut contour intersects itself. Try a slightly different plane.');
       seen.add(cur);
       ids.push(cur);
-      const next = links.get(cur).find((i) => i !== prev);
-      prev = cur;
-      cur = next;
+      cur = nextVertex.get(cur);
     } while (cur !== start);
     const xy = ids.map((i) => [dot(mesh.vertices[i], u), dot(mesh.vertices[i], v)]);
-    const area = Math.abs(
-      xy.reduce((s, p, i) => {
-        const q = xy[(i + 1) % xy.length];
-        return s + p[0] * q[1] - q[0] * p[1];
-      }, 0) / 2,
-    );
-    loops.push({ ids, xy, area, parent: null, depth: 0 });
+    // Directed sidewall edges distinguish solid contours from cavity contours.
+    // Separate solid shells may overlap or nest; containment alone does not
+    // make one a hole in the other.
+    const origin = xy[0],
+      signedArea =
+        xy.reduce((s, p, i) => {
+          const q = xy[(i + 1) % xy.length];
+          return (
+            s + (p[0] - origin[0]) * (q[1] - origin[1]) - (q[0] - origin[0]) * (p[1] - origin[1])
+          );
+        }, 0) / 2;
+    loops.push({
+      ids,
+      xy,
+      area: Math.abs(signedArea),
+      hole: signedArea * dot(n, outward) > 0,
+      parent: null,
+    });
   }
   loops.sort((a, b) => b.area - a.area);
-  for (let i = 0; i < loops.length; i++)
-    for (let j = i - 1; j >= 0; j--)
-      if (pointInPolygon(loops[i].xy[0], loops[j].xy)) {
+  for (let i = 0; i < loops.length; i++) {
+    if (!loops[i].hole) continue;
+    for (let j = i - 1; j >= 0; j--) {
+      if (!loops[j].hole && pointInPolygon(loops[i].xy[0], loops[j].xy)) {
         loops[i].parent = loops[j];
-        loops[i].depth = loops[j].depth + 1;
         break;
       }
+    }
+    if (!loops[i].parent)
+      throw new Error('A cut cavity has no enclosing solid. Repair the source model.');
+  }
   function emit(ids) {
     const p = ids.map((i) => mesh.vertices[i]);
     if (dot(cross(sub(p[1], p[0]), sub(p[2], p[0])), outward) < 0) ids = [ids[0], ids[2], ids[1]];
     mesh.faces.push({ v: ids, material, cap: true });
   }
-  for (const outer of loops.filter((l) => l.depth % 2 === 0)) {
+  for (const outer of loops.filter((l) => !l.hole)) {
     const rings = [outer, ...loops.filter((l) => l.parent === outer)],
       flat = [],
       ids = [],
@@ -207,14 +223,18 @@ function capMesh(mesh, n, offset, outward, material) {
       if (r) holes.push(ids.length);
       const ring = rings[r];
       for (let j = 0; j < ring.ids.length; j++) {
+        // Remove only floating-point noise, not real shallow contour bends.
+        // The weld tolerance is too coarse for cap simplification.
         const a = mesh.vertices[ring.ids[(j + ring.ids.length - 1) % ring.ids.length]],
           b = mesh.vertices[ring.ids[j]],
-          c = mesh.vertices[ring.ids[(j + 1) % ring.ids.length]];
-        // Floating point noise can turn a collinear point into a tiny ear.
-        // Triangulate the corner polygon, then restore its exact edge chains.
+          c = mesh.vertices[ring.ids[(j + 1) % ring.ids.length]],
+          rounding =
+            Number.EPSILON *
+            128 *
+            Math.max(1, ...a.map(Math.abs), ...b.map(Math.abs), ...c.map(Math.abs));
         if (
           length(cross(sub(b, a), sub(c, b))) <=
-            EPS * 8 * (length(sub(b, a)) + length(sub(c, b))) &&
+            rounding * (length(sub(b, a)) + length(sub(c, b))) &&
           dot(sub(b, a), sub(c, b)) > 0
         )
           continue;
@@ -224,10 +244,12 @@ function capMesh(mesh, n, offset, outward, material) {
       }
     }
     const tris = earcut(flat, holes, 2);
+    const used = new Set(tris.map((i) => ids[i]));
     if (deviation(flat, holes, 2, tris) > 1e-6)
       throw new Error('Could not triangulate this cut surface reliably. Try a different plane.');
-    // Earcut may remove collinear contour points. Restore every boundary segment
-    // so caps and painted sidewalls share precisely the same edges.
+    // Earcut may remove exactly collinear contour points. Restore only omitted
+    // points; expanding a chord through a point used by another triangle would
+    // overlap that triangle and duplicate boundary edges.
     function chain(a, b) {
       const [ra, ia] = locations[a],
         [rb, ib] = locations[b];
@@ -245,7 +267,12 @@ function capMesh(mesh, n, offset, outward, material) {
           const id = ring.ids[i],
             ap = sub(mesh.vertices[id], pa),
             t = dot(ap, ab) / norm;
-          if (t <= 0 || t >= 1 || length(cross(ap, ab)) > EPS * 8 * Math.sqrt(norm)) {
+          if (
+            used.has(id) ||
+            t <= 0 ||
+            t >= 1 ||
+            length(cross(ap, ab)) > EPS * 8 * Math.sqrt(norm)
+          ) {
             valid = false;
             break;
           }
